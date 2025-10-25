@@ -2,6 +2,20 @@ import { NextResponse } from 'next/server'
 import { supabase } from '../../../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
+// In-memory store for online users (in production, use Redis)
+const onlineUsers = new Map() // userId -> lastSeen timestamp
+
+// Clean up offline users every minute
+setInterval(() => {
+  const now = Date.now()
+  const timeout = 60000 // 1 minute
+  for (const [userId, lastSeen] of onlineUsers.entries()) {
+    if (now - lastSeen > timeout) {
+      onlineUsers.delete(userId)
+    }
+  }
+}, 60000)
+
 // Simple password hashing (in production, use bcrypt)
 function hashPassword(password) {
   return Buffer.from(password).toString('base64')
@@ -123,25 +137,12 @@ async function handleGetProfiles(request) {
       )
     }
 
-    // Get IDs of users current user has already liked
-    const { data: likedUsers } = await supabase
-      .from('likes')
-      .select('toUserId')
-      .eq('fromUserId', userId)
-
-    const likedUserIds = likedUsers ? likedUsers.map(l => l.toUserId) : []
-
-    // Get all profiles except current user and already liked users
-    let query = supabase
+    // Get all profiles except current user (don't filter by likes)
+    const { data: profiles, error } = await supabase
       .from('profiles')
       .select('id, name, bio, department, year, interests, photo_url, email')
       .neq('id', userId)
-
-    if (likedUserIds.length > 0) {
-      query = query.not('id', 'in', `(${likedUserIds.join(',')})`)
-    }
-
-    const { data: profiles, error } = await query.limit(20)
+      .limit(50)
 
     if (error) {
       console.error('Get profiles error:', error)
@@ -286,6 +287,42 @@ async function handleLike(request) {
   }
 }
 
+// Get user's likes
+async function handleGetLikes(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID required' },
+        { status: 400 }
+      )
+    }
+
+    const { data: likes, error } = await supabase
+      .from('likes')
+      .select('*')
+      .eq('fromUserId', userId)
+
+    if (error) {
+      console.error('Get likes error:', error)
+      return NextResponse.json(
+        { error: 'Failed to fetch likes' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ likes: likes || [] })
+  } catch (error) {
+    console.error('Get likes error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
 // Match Routes
 async function handleGetMatches(request) {
   try {
@@ -415,6 +452,55 @@ async function handleSendMessage(request) {
   }
 }
 
+// Online Status Routes
+async function handleGetOnlineUsers(request) {
+  try {
+    const activeUserIds = Array.from(onlineUsers.keys())
+    return NextResponse.json({ onlineUsers: activeUserIds })
+  } catch (error) {
+    console.error('Get online users error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleUpdateOnlineStatus(request) {
+  try {
+    // Check if request has a body
+    const text = await request.text()
+    if (!text || text.trim() === '') {
+      return NextResponse.json(
+        { error: 'Request body is required' },
+        { status: 400 }
+      )
+    }
+
+    // Parse the JSON
+    const body = JSON.parse(text)
+    const { userId } = body
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID required' },
+        { status: 400 }
+      )
+    }
+
+    // Update last seen timestamp
+    onlineUsers.set(userId, Date.now())
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Update online status error:', error)
+    return NextResponse.json(
+      { error: 'Invalid request: ' + error.message },
+      { status: 400 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
@@ -425,6 +511,10 @@ export async function GET(request) {
     return handleGetMatches(request)
   } else if (pathname.includes('/api/messages')) {
     return handleGetMessages(request)
+  } else if (pathname.includes('/api/online')) {
+    return handleGetOnlineUsers(request)
+  } else if (pathname.includes('/api/likes')) {
+    return handleGetLikes(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -443,6 +533,8 @@ export async function POST(request) {
     return handleLike(request)
   } else if (pathname.includes('/api/messages')) {
     return handleSendMessage(request)
+  } else if (pathname.includes('/api/online')) {
+    return handleUpdateOnlineStatus(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
