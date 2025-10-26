@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,6 +35,10 @@ export default function App() {
   const [touchStart, setTouchStart] = useState(null)
   const [touchEnd, setTouchEnd] = useState(null)
   const [showProfileModal, setShowProfileModal] = useState(false)
+  const [unreadMessages, setUnreadMessages] = useState(new Set()) // Track which friends have unread messages
+  const [warnings, setWarnings] = useState([]) // Store warnings
+  const [unreadWarningsCount, setUnreadWarningsCount] = useState(0) // Count of unread warnings
+  const [showNotifications, setShowNotifications] = useState(false) // Toggle notification dropdown
 
   // Auth form state
   const [authForm, setAuthForm] = useState({
@@ -74,6 +78,95 @@ export default function App() {
       return () => clearInterval(interval)
     }
   }, [selectedMatch])
+
+  useEffect(() => {
+    // Check for unread messages from all friends
+    const checkUnreadMessages = async () => {
+      if (!currentUser || !matches.length) return
+      
+      for (const match of matches) {
+        // Skip the currently selected match (it's already marked as read)
+        if (selectedMatch?.id === match.id) continue
+        
+        try {
+          const response = await fetch(`/api/messages?matchId=${match.id}`)
+          const data = await response.json()
+          if (response.ok && data.messages && data.messages.length > 0) {
+            // Check if there are any messages from the friend (not from current user)
+            const hasNewMessages = data.messages.some(
+              msg => msg.senderId === match.matchedUser?.id && 
+              msg.createdAt > (localStorage.getItem(`lastRead_${match.id}`) || 0)
+            )
+            
+            if (hasNewMessages) {
+              setUnreadMessages(prev => new Set(prev).add(match.id))
+            }
+          }
+        } catch (error) {
+          console.error('Failed to check messages:', error)
+        }
+      }
+    }
+    
+    if (matches.length > 0) {
+      checkUnreadMessages()
+      // Check every 3 seconds for new messages
+      const interval = setInterval(checkUnreadMessages, 3000)
+      return () => clearInterval(interval)
+    }
+  }, [matches, currentUser, selectedMatch])
+
+  // Check for warnings when user logs in
+  useEffect(() => {
+    const checkWarnings = async () => {
+      if (!currentUser) return
+      
+      try {
+        const response = await fetch(`/api/warnings?userId=${currentUser.id}`)
+        const data = await response.json()
+        
+        if (response.ok && data.warnings && data.warnings.length > 0) {
+          // Store warnings in state
+          setWarnings(data.warnings)
+          setUnreadWarningsCount(data.warnings.length)
+          
+          // Show toast notification for new warnings
+          toast.error(`You have ${data.warnings.length} new warning(s) from admin`, {
+            duration: 8000,
+            action: {
+              label: 'View',
+              onClick: () => setShowNotifications(true)
+            }
+          })
+        }
+      } catch (error) {
+        console.error('Failed to check warnings:', error)
+      }
+    }
+    
+    if (currentUser && view === 'main') {
+      checkWarnings()
+      // Check for new warnings every 30 seconds
+      const interval = setInterval(checkWarnings, 30000)
+      return () => clearInterval(interval)
+    }
+  }, [currentUser, view])
+
+  async function markWarningAsRead(warningId) {
+    try {
+      await fetch('/api/warnings/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ warningId })
+      })
+      
+      // Remove from warnings list and update count
+      setWarnings(prev => prev.filter(w => w.id !== warningId))
+      setUnreadWarningsCount(prev => Math.max(0, prev - 1))
+    } catch (error) {
+      console.error('Failed to mark warning as read:', error)
+    }
+  }
 
   useEffect(() => {
     // Update online status every 30 seconds
@@ -251,6 +344,17 @@ export default function App() {
       const data = await response.json()
       if (response.ok) {
         setMessages(data.messages || [])
+        
+        // Mark this friend as read (remove from unread set)
+        setUnreadMessages(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(matchId)
+          return newSet
+        })
+        
+        // Save timestamp of when we last read messages from this friend
+        localStorage.setItem(`lastRead_${matchId}`, new Date().toISOString())
+        
         // Auto scroll to bottom
         setTimeout(() => {
           const chatContainer = document.getElementById('chat-messages')
@@ -430,49 +534,86 @@ export default function App() {
 
   const handleUpdateMyProfile = async (e) => {
     e.preventDefault()
+    console.log('=== PROFILE UPDATE STARTED ===')
+    console.log('Form submitted, current state:', { loading, uploadingPhoto })
+    
+    if (loading || uploadingPhoto) {
+      console.log('Already processing, skipping...')
+      return
+    }
+    
     setLoading(true)
 
     try {
+      console.log('Profile form data:', profileForm)
+      console.log('Current user:', currentUser)
+      
       // Upload photo if it's a base64 preview
       let finalPhotoUrl = profileForm.photo_url
       if (profileForm.photo_url && !profileForm.photo_url.startsWith('http')) {
+        console.log('Photo is base64, uploading to server...')
         toast.info('Uploading photo...')
         finalPhotoUrl = await uploadPhotoToServer(profileForm.photo_url)
+        console.log('Photo upload result:', finalPhotoUrl)
         if (!finalPhotoUrl) {
           setLoading(false)
+          toast.error('Failed to upload photo. Please try again.')
+          console.error('Photo upload failed, stopping profile update')
           return
         }
+        toast.success('Photo uploaded successfully!')
+      } else {
+        console.log('Photo is already a URL or empty:', finalPhotoUrl)
       }
 
       const interestsArray = profileForm.interests.split(',').map(i => i.trim()).filter(i => i)
       
+      const payload = {
+        userId: currentUser.id,
+        name: profileForm.name,
+        bio: profileForm.bio,
+        department: profileForm.department,
+        year: profileForm.year,
+        photo_url: finalPhotoUrl,
+        interests: interestsArray
+      }
+      
+      console.log('Sending profile update to API:', payload)
+      toast.info('Saving profile...')
+      
       const response = await fetch('/api/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUser.id,
-          ...profileForm,
-          photo_url: finalPhotoUrl,
-          interests: interestsArray
-        })
+        body: JSON.stringify(payload)
       })
 
+      console.log('API response status:', response.status)
       const data = await response.json()
+      console.log('API response data:', data)
 
       if (response.ok) {
         toast.success('Profile updated successfully!')
         const updatedUser = { ...currentUser, ...data.profile }
+        console.log('Updated user object:', updatedUser)
         setCurrentUser(updatedUser)
         localStorage.setItem('currentUser', JSON.stringify(updatedUser))
         setIsEditingProfile(false)
+        
+        // Reload profiles to show updated data
+        console.log('Reloading profiles...')
+        await loadProfiles(currentUser.id)
+        console.log('=== PROFILE UPDATE COMPLETED SUCCESSFULLY ===')
       } else {
+        console.error('Profile update failed:', data)
         toast.error(data.error || 'Failed to update profile')
       }
     } catch (error) {
-      toast.error('Something went wrong!')
+      console.error('Profile update error:', error)
+      toast.error('Something went wrong: ' + error.message)
+    } finally {
+      setLoading(false)
+      console.log('=== PROFILE UPDATE FINISHED (loading set to false) ===')
     }
-
-    setLoading(false)
   }
 
   const openMyProfile = () => {
@@ -519,10 +660,12 @@ export default function App() {
     setUploadingPhoto(true)
 
     try {
+      console.log('Converting base64 to blob...')
       // Convert base64 to blob
       const response = await fetch(photoUrl)
       const blob = await response.blob()
       
+      console.log('Uploading to imgbb...', blob.size, 'bytes')
       // Upload to imgbb
       const formData = new FormData()
       formData.append('image', blob)
@@ -533,19 +676,22 @@ export default function App() {
       })
 
       const data = await uploadResponse.json()
+      console.log('ImgBB response:', data)
 
       if (data.success) {
         setUploadingPhoto(false)
+        console.log('Photo uploaded successfully:', data.data.url)
         return data.data.url
       } else {
         setUploadingPhoto(false)
-        toast.error('Failed to upload photo')
+        console.error('ImgBB upload failed:', data)
+        toast.error('Failed to upload photo: ' + (data.error?.message || 'Unknown error'))
         return null
       }
     } catch (error) {
       console.error('Photo upload error:', error)
       setUploadingPhoto(false)
-      toast.error('Failed to upload photo')
+      toast.error('Failed to upload photo: ' + error.message)
       return null
     }
   }
@@ -1191,25 +1337,45 @@ export default function App() {
                       )}
 
                       {profileForm.photo_url && (
-                        <p className="text-xs text-green-600 mt-2 flex items-center gap-1">
-                          <span className="inline-block w-2 h-2 bg-green-600 rounded-full"></span>
-                          Photo ready! Click "Save Changes" to upload
-                        </p>
+                        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                          <p className="text-sm text-green-700 font-medium flex items-center gap-2">
+                            <span className="inline-block w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
+                            Photo ready! Click "Save Changes" below to upload and save your profile.
+                          </p>
+                        </div>
                       )}
                     </div>
-                    <div className="flex gap-3">
+                    
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 pt-2">
                       <Button 
                         type="submit" 
-                        className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                        disabled={loading}
+                        className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg"
+                        disabled={loading || uploadingPhoto}
+                        onClick={() => console.log('Save button clicked, loading:', loading, 'uploadingPhoto:', uploadingPhoto)}
                       >
-                        {loading ? 'Saving...' : 'Save Changes'}
+                        {loading ? (
+                          <span className="flex items-center gap-2">
+                            <span className="animate-spin">⏳</span> Saving...
+                          </span>
+                        ) : uploadingPhoto ? (
+                          <span className="flex items-center gap-2">
+                            <span className="animate-spin">📤</span> Uploading Photo...
+                          </span>
+                        ) : (
+                          'Save Changes'
+                        )}
                       </Button>
                       <Button 
                         type="button"
                         variant="outline"
-                        onClick={() => setIsEditingProfile(false)}
-                        disabled={loading}
+                        onClick={() => {
+                          setIsEditingProfile(false)
+                          // Reset any stuck states
+                          setLoading(false)
+                          setUploadingPhoto(false)
+                        }}
+                        disabled={loading || uploadingPhoto}
                       >
                         Cancel
                       </Button>
@@ -1226,7 +1392,7 @@ export default function App() {
 
   // Main App
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 overflow-x-hidden">
       {/* Header */}
       <div className="bg-white border-b shadow-sm">
         <div className="container mx-auto px-4 py-4">
@@ -1237,7 +1403,142 @@ export default function App() {
                 Anurag Connect
               </h1>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 md:gap-4">
+              {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="relative p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  title="Notifications"
+                >
+                  <Bell className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
+                  {unreadWarningsCount > 0 && (
+                    <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                      {unreadWarningsCount}
+                    </span>
+                  )}
+                </button>
+                
+                {/* Notification Dropdown */}
+                {showNotifications && (
+                  <>
+                    {/* Mobile: Full screen overlay */}
+                    <div 
+                      className="fixed inset-0 bg-black/50 z-40 md:hidden"
+                      onClick={() => setShowNotifications(false)}
+                    />
+                    
+                    {/* Notification Panel */}
+                    <div className="fixed md:absolute left-0 right-0 md:left-auto md:right-0 bottom-0 md:bottom-auto md:top-full md:mt-2 md:w-96 bg-white md:rounded-lg shadow-2xl border-t md:border border-gray-200 z-50 max-h-[80vh] md:max-h-[500px] overflow-hidden flex flex-col">
+                      {/* Header */}
+                      <div className="flex-shrink-0 p-4 border-b bg-gradient-to-r from-red-50 to-pink-50 sticky top-0">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Bell className="h-5 w-5 text-red-600" />
+                            <h3 className="font-bold text-gray-800">Notifications</h3>
+                          </div>
+                          <button 
+                            onClick={() => setShowNotifications(false)}
+                            className="p-1 hover:bg-red-100 rounded-full transition-colors"
+                            aria-label="Close notifications"
+                          >
+                            <X className="h-5 w-5 text-gray-600" />
+                          </button>
+                        </div>
+                        {unreadWarningsCount > 0 && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <Badge variant="destructive" className="text-xs">
+                              {unreadWarningsCount} unread
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    
+                      {/* Notifications List */}
+                      <div className="flex-1 overflow-y-auto">
+                        {warnings.length === 0 ? (
+                          <div className="p-8 text-center text-gray-500">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
+                              <Bell className="h-8 w-8 text-gray-400" />
+                            </div>
+                            <p className="text-sm font-medium">No notifications</p>
+                            <p className="text-xs text-gray-400 mt-1">You're all caught up!</p>
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-gray-100">
+                            {warnings.map((warning, index) => (
+                              <div 
+                                key={warning.id} 
+                                className="p-4 hover:bg-red-50/50 transition-all duration-200 cursor-pointer group"
+                                style={{ animationDelay: `${index * 50}ms` }}
+                              >
+                                <div className="flex items-start gap-3">
+                                  {/* Icon */}
+                                  <div className="flex-shrink-0">
+                                    <div className="h-10 w-10 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
+                                      <AlertTriangle className="h-5 w-5 text-red-600" />
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Content */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between gap-2 mb-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">
+                                          Warning
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                          from Admin
+                                        </span>
+                                      </div>
+                                    </div>
+                                    
+                                    <p className="text-sm text-gray-900 leading-relaxed break-words mb-2">
+                                      {warning.message}
+                                    </p>
+                                    
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs text-gray-500 flex items-center gap-1">
+                                        <span className="inline-block w-1 h-1 rounded-full bg-gray-400"></span>
+                                        {new Date(warning.createdAt).toLocaleDateString()} at {new Date(warning.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </p>
+                                      
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          markWarningAsRead(warning.id)
+                                        }}
+                                        className="text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-100 px-2 py-1 rounded transition-colors"
+                                      >
+                                        Dismiss
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Footer - Only show if there are notifications */}
+                      {warnings.length > 0 && (
+                        <div className="flex-shrink-0 p-3 border-t bg-gray-50 text-center">
+                          <button
+                            onClick={() => {
+                              warnings.forEach(w => markWarningAsRead(w.id))
+                            }}
+                            className="text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                          >
+                            Clear all notifications
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+              
               <button 
                 onClick={openMyProfile}
                 className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors"
@@ -1258,120 +1559,160 @@ export default function App() {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
-        <Tabs defaultValue="discover" className="w-full">
+      <div className="container mx-auto px-4 py-8 overflow-x-hidden">
+        <Tabs defaultValue="discover" className="w-full overflow-x-hidden">
           <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-8">
             <TabsTrigger value="discover">Discover</TabsTrigger>
-            <TabsTrigger value="matches">Matches ({matches.length})</TabsTrigger>
+            <TabsTrigger value="matches">Friends</TabsTrigger>
           </TabsList>
 
           {/* Discover Tab */}
-          <TabsContent value="discover">
+          <TabsContent value="discover" className="overflow-x-hidden">
             <div className="max-w-2xl mx-auto px-4">
-              <h2 className="text-3xl font-bold text-center mb-4">Discover Students</h2>
+              {/* Modern Animated Header */}
+              <div className="text-center mb-8 relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 blur-3xl -z-10 animate-pulse"></div>
+                <h2 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 mb-2">
+                  Discover Students
+                </h2>
+                <p className="text-gray-600 text-sm font-medium">Find your perfect match at Anurag University</p>
+              </div>
               
               {currentProfileIndex >= profiles.length ? (
-                <Card className="p-12">
-                  <div className="text-center text-gray-500">
-                    <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-xl">No more profiles to show</p>
-                    <p className="text-sm mt-2">Check back later for new students!</p>
-                    <Button 
-                      onClick={() => setCurrentProfileIndex(0)}
-                      className="mt-4 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                    >
-                      Start Over
-                    </Button>
-                  </div>
-                </Card>
+                <div className="relative">
+                  {/* Glassmorphism card */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-pink-200/50 via-purple-200/50 to-blue-200/50 blur-2xl"></div>
+                  <Card className="relative backdrop-blur-xl bg-white/60 border-2 border-white/50 shadow-2xl p-12 rounded-3xl overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-pink-300/30 to-purple-300/30 rounded-full blur-3xl -mr-32 -mt-32"></div>
+                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-gradient-to-tr from-blue-300/30 to-purple-300/30 rounded-full blur-3xl -ml-32 -mb-32"></div>
+                    <div className="text-center text-gray-600 relative z-10">
+                      <div className="relative inline-block mb-6">
+                        <Heart className="h-20 w-20 mx-auto text-pink-400 animate-bounce" />
+                        <div className="absolute inset-0 bg-pink-400/30 blur-2xl animate-pulse"></div>
+                      </div>
+                      <p className="text-2xl font-bold mb-2 text-gray-800">No more profiles to show</p>
+                      <p className="text-base mt-2 mb-6 text-gray-600">Check back later for new students!</p>
+                      <Button 
+                        onClick={() => setCurrentProfileIndex(0)}
+                        className="mt-4 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 hover:from-pink-700 hover:via-purple-700 hover:to-blue-700 text-white px-8 py-6 text-lg font-bold rounded-2xl shadow-2xl hover:shadow-pink-500/50 transition-all duration-300 hover:scale-105 active:scale-95"
+                      >
+                        <Sparkles className="mr-2 h-5 w-5" />
+                        Start Over
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
               ) : (
                 <div className="relative pb-4">
-                  {/* Swipe Instructions */}
-                  <div className="text-center mb-4">
-                    <p className="text-sm text-gray-600">
+                  {/* Swipe Instructions with glassmorphism */}
+                  <div className="text-center mb-6 backdrop-blur-md bg-white/70 rounded-2xl p-4 border border-white/50 shadow-lg">
+                    <p className="text-base font-semibold text-transparent bg-clip-text bg-gradient-to-r from-pink-600 to-purple-600">
                       Swipe right 💚 to send request • Swipe left ❌ to pass
                     </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Profile {currentProfileIndex + 1} of {profiles.length}
-                    </p>
+                    <div className="flex items-center justify-center gap-2 mt-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-pink-500 to-purple-500 animate-pulse"></div>
+                      <p className="text-sm text-gray-700 font-medium">
+                        Profile {currentProfileIndex + 1} of {profiles.length}
+                      </p>
+                      <div className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 animate-pulse"></div>
+                    </div>
                   </div>
 
-                  {/* Swipe Card Container */}
-                  <div className="relative min-h-[550px] flex items-center justify-center mb-6">
+                  {/* Swipe Card Container with 3D effect */}
+                  <div className="swipe-container relative min-h-[600px] flex items-center justify-center mb-8" style={{ perspective: '1000px' }}>
+                    {/* Background glow effects */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-pink-300/20 via-purple-300/20 to-blue-300/20 blur-3xl animate-pulse"></div>
+                    
                     {profiles[currentProfileIndex] && (
                       <Card 
-                        className={`w-full max-w-md mx-auto overflow-hidden shadow-2xl transition-all duration-300 ${
+                        className={`relative w-full max-w-md mx-auto overflow-hidden shadow-2xl transition-all duration-500 rounded-3xl border-2 border-white/60 hover:shadow-pink-500/30 ${
                           swipeDirection === 'left' ? 'translate-x-[-150%] rotate-[-20deg] opacity-0' :
                           swipeDirection === 'right' ? 'translate-x-[150%] rotate-[20deg] opacity-0' :
-                          'translate-x-0 rotate-0 opacity-100'
+                          'translate-x-0 rotate-0 opacity-100 hover:scale-[1.02]'
                         }`}
+                        style={{
+                          transformStyle: 'preserve-3d',
+                          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 60px -15px rgba(236, 72, 153, 0.3)'
+                        }}
                         onTouchStart={handleTouchStart}
                         onTouchMove={handleTouchMove}
                         onTouchEnd={handleTouchEnd}
                       >
-                        {/* Photo Section */}
-                        <div className="relative h-[400px] bg-gradient-to-br from-pink-200 to-purple-200">
+                        {/* Photo Section with enhanced gradient */}
+                        <div className="relative h-[450px] bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 overflow-hidden">
                           {profiles[currentProfileIndex].photo_url ? (
                             <img 
                               src={profiles[currentProfileIndex].photo_url} 
                               alt={profiles[currentProfileIndex].name} 
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover transition-transform duration-700 hover:scale-110"
                             />
                           ) : (
-                            <div className="flex items-center justify-center h-full">
-                              <User className="h-32 w-32 text-gray-400" />
+                            <div className="flex items-center justify-center h-full relative">
+                              <div className="absolute inset-0 bg-gradient-to-br from-pink-200 via-purple-200 to-blue-200 opacity-50"></div>
+                              <User className="h-40 w-40 text-white/80 relative z-10" />
                             </div>
                           )}
                           
-                          {/* Gradient overlay */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                          {/* Enhanced gradient overlay */}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
                           
-                          {/* Info overlay */}
-                          <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
-                            <h2 className="text-3xl font-bold mb-1 drop-shadow-lg">
+                          {/* Decorative elements */}
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-white/20 to-transparent rounded-full blur-2xl"></div>
+                          <div className="absolute bottom-0 left-0 w-40 h-40 bg-gradient-to-tr from-purple-500/30 to-transparent rounded-full blur-3xl"></div>
+                          
+                          {/* Info overlay with glassmorphism */}
+                          <div className="absolute bottom-0 left-0 right-0 p-6 text-white backdrop-blur-sm bg-gradient-to-t from-black/60 to-transparent">
+                            <h2 className="text-4xl font-black mb-2 drop-shadow-2xl tracking-tight">
                               {profiles[currentProfileIndex].name}
                               {profiles[currentProfileIndex].year && (
-                                <span className="text-xl ml-2 opacity-90">, {profiles[currentProfileIndex].year}</span>
+                                <span className="text-2xl ml-2 opacity-95 font-bold">, {profiles[currentProfileIndex].year}</span>
                               )}
                             </h2>
                             {profiles[currentProfileIndex].department && (
-                              <p className="text-base opacity-95 drop-shadow-md">
-                                📚 {profiles[currentProfileIndex].department}
-                              </p>
+                              <div className="inline-block backdrop-blur-md bg-white/20 px-4 py-2 rounded-full border border-white/30">
+                                <p className="text-base font-semibold drop-shadow-lg flex items-center gap-2">
+                                  <span className="text-xl">📚</span>
+                                  {profiles[currentProfileIndex].department}
+                                </p>
+                              </div>
                             )}
                           </div>
 
-                          {/* Already liked badge */}
+                          {/* Enhanced already liked badge */}
                           {likedProfiles.has(profiles[currentProfileIndex].id) && (
-                            <div className="absolute top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg animate-pulse">
-                              ✓ Request Sent
+                            <div className="absolute top-6 right-6 backdrop-blur-xl bg-green-500/90 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl animate-pulse border-2 border-white/50">
+                              <div className="flex items-center gap-2">
+                                <Heart className="h-4 w-4 fill-white" />
+                                <span>Request Sent</span>
+                              </div>
                             </div>
                           )}
                         </div>
 
-                        {/* Quick Info Section */}
-                        <CardContent className="p-4 bg-white">
+                        {/* Quick Info Section with gradient background */}
+                        <CardContent className="p-6 bg-gradient-to-br from-white via-pink-50/30 to-purple-50/30 backdrop-blur-sm">
                           {/* Bio Preview */}
                           {profiles[currentProfileIndex].bio && (
-                            <p className="text-gray-700 text-sm line-clamp-2 mb-3">
-                              {profiles[currentProfileIndex].bio}
-                            </p>
+                            <div className="mb-4 p-4 backdrop-blur-sm bg-white/60 rounded-2xl border border-white/50 shadow-md">
+                              <p className="text-gray-800 text-sm line-clamp-3 leading-relaxed font-medium">
+                                💭 {profiles[currentProfileIndex].bio}
+                              </p>
+                            </div>
                           )}
 
-                          {/* Interests Preview */}
+                          {/* Interests Preview with modern pills */}
                           {profiles[currentProfileIndex].interests && profiles[currentProfileIndex].interests.length > 0 && (
                             <div className="flex flex-wrap gap-2">
                               {profiles[currentProfileIndex].interests.slice(0, 4).map((interest, idx) => (
                                 <Badge 
                                   key={idx} 
-                                  variant="secondary" 
-                                  className="text-xs px-2 py-1"
+                                  className="text-xs px-4 py-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white font-semibold rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105 border-2 border-white/50"
                                 >
                                   {interest}
                                 </Badge>
                               ))}
                               {profiles[currentProfileIndex].interests.length > 4 && (
-                                <Badge variant="outline" className="text-xs px-2 py-1">
+                                <Badge className="text-xs px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold rounded-full shadow-lg border-2 border-white/50">
                                   +{profiles[currentProfileIndex].interests.length - 4} more
                                 </Badge>
                               )}
@@ -1382,48 +1723,62 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex justify-center items-center gap-8">
+                  {/* Action Buttons with modern design */}
+                  <div className="flex justify-center items-center gap-6 mb-4">
                     {/* Pass Button */}
                     <button
                       onClick={handleSwipeLeft}
-                      className="w-16 h-16 rounded-full bg-white shadow-lg hover:shadow-xl transition-all border-2 border-red-200 hover:border-red-400 hover:scale-110 active:scale-95 flex items-center justify-center group"
+                      className="relative w-20 h-20 rounded-full bg-gradient-to-br from-red-400 to-red-600 shadow-2xl hover:shadow-red-500/50 transition-all border-4 border-white hover:scale-110 active:scale-95 flex items-center justify-center group overflow-hidden"
                       aria-label="Pass"
                     >
-                      <X className="h-8 w-8 text-red-500 group-hover:text-red-600" strokeWidth={2.5} />
+                      <div className="absolute inset-0 bg-white/20 group-hover:bg-white/30 transition-all"></div>
+                      <X className="h-10 w-10 text-white relative z-10" strokeWidth={3} />
+                      <div className="absolute inset-0 bg-red-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
                     </button>
 
                     {/* Info Button */}
                     <button
                       onClick={() => openProfileView(profiles[currentProfileIndex])}
-                      className="w-14 h-14 rounded-full bg-white shadow-lg hover:shadow-xl transition-all border-2 border-blue-200 hover:border-blue-400 hover:scale-110 active:scale-95 flex items-center justify-center group"
+                      className="relative w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 shadow-2xl hover:shadow-blue-500/50 transition-all border-4 border-white hover:scale-110 active:scale-95 flex items-center justify-center group overflow-hidden"
                       aria-label="View Profile"
                     >
-                      <User className="h-6 w-6 text-blue-500 group-hover:text-blue-600" strokeWidth={2.5} />
+                      <div className="absolute inset-0 bg-white/20 group-hover:bg-white/30 transition-all"></div>
+                      <User className="h-7 w-7 text-white relative z-10" strokeWidth={3} />
+                      <div className="absolute inset-0 bg-blue-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
                     </button>
 
                     {/* Like Button */}
                     <button
                       onClick={handleSwipeRight}
                       disabled={likedProfiles.has(profiles[currentProfileIndex]?.id)}
-                      className={`w-16 h-16 rounded-full shadow-lg hover:shadow-xl transition-all border-2 active:scale-95 flex items-center justify-center group ${
+                      className={`relative w-20 h-20 rounded-full shadow-2xl transition-all border-4 border-white active:scale-95 flex items-center justify-center group overflow-hidden ${
                         likedProfiles.has(profiles[currentProfileIndex]?.id)
-                          ? 'bg-gray-300 border-gray-400 cursor-not-allowed opacity-60'
-                          : 'bg-white border-green-200 hover:border-green-400 hover:scale-110'
+                          ? 'bg-gradient-to-br from-gray-300 to-gray-400 cursor-not-allowed opacity-60'
+                          : 'bg-gradient-to-br from-green-400 to-green-600 hover:shadow-green-500/50 hover:scale-110'
                       }`}
                       aria-label="Like"
                     >
-                      <Heart className={`h-8 w-8 ${
+                      <div className={`absolute inset-0 ${likedProfiles.has(profiles[currentProfileIndex]?.id) ? '' : 'bg-white/20 group-hover:bg-white/30'} transition-all`}></div>
+                      <Heart className={`h-10 w-10 relative z-10 ${
                         likedProfiles.has(profiles[currentProfileIndex]?.id)
-                          ? 'text-gray-500 fill-gray-500'
-                          : 'text-green-500 group-hover:text-green-600 group-hover:fill-green-500'
-                      }`} strokeWidth={2.5} />
+                          ? 'text-white fill-white'
+                          : 'text-white fill-white'
+                      }`} strokeWidth={3} />
+                      {!likedProfiles.has(profiles[currentProfileIndex]?.id) && (
+                        <div className="absolute inset-0 bg-green-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
+                      )}
                     </button>
                   </div>
 
-                  {/* Keyboard shortcuts hint */}
-                  <div className="text-center mt-4 text-xs text-gray-400">
-                    <p>💡 Use ← → arrow keys or swipe on mobile</p>
+                  {/* Keyboard shortcuts hint with modern style */}
+                  <div className="text-center mt-6">
+                    <div className="inline-block backdrop-blur-md bg-white/70 px-6 py-3 rounded-full border border-white/50 shadow-lg">
+                      <p className="text-xs text-gray-700 font-semibold flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-purple-500" />
+                        Use ← → arrow keys or swipe on mobile
+                        <Sparkles className="h-4 w-4 text-pink-500" />
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1561,24 +1916,25 @@ export default function App() {
             )}
           </TabsContent>
 
-          {/* Matches Tab */}
+          {/* Friends Tab */}
           <TabsContent value="matches">
             <div className="max-w-6xl mx-auto">
-              <h2 className="text-3xl font-bold text-center mb-8">Your Matches</h2>
+              <h2 className="text-3xl font-bold text-center mb-8">Your Friends</h2>
               {matches.length === 0 ? (
                 <Card className="p-12">
                   <div className="text-center text-gray-500">
                     <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-xl">No matches yet</p>
+                    <p className="text-xl">No friends yet</p>
                     <p className="text-sm mt-2">Start liking profiles to find your match!</p>
                   </div>
                 </Card>
               ) : (
                 <div className="grid lg:grid-cols-3 gap-6">
-                  {/* Match List */}
+                  {/* Friend List */}
                   <div className="lg:col-span-1 space-y-4">
                     {matches.map((match) => {
                       const isOnline = onlineUsers.has(match.matchedUser?.id)
+                      const hasUnread = unreadMessages.has(match.id)
                       return (
                         <Card 
                           key={match.id}
@@ -1610,7 +1966,13 @@ export default function App() {
                                   )}
                                 </p>
                               </div>
-                              <MessageCircle className="h-5 w-5 text-purple-500" />
+                              <div className="flex items-center gap-2">
+                                {/* Blue dot for unread messages */}
+                                {hasUnread && (
+                                  <span className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></span>
+                                )}
+                                <MessageCircle className="h-5 w-5 text-purple-500" />
+                              </div>
                             </div>
                           </CardContent>
                         </Card>

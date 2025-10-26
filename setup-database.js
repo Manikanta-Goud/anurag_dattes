@@ -18,6 +18,7 @@ async function setupDatabase() {
         DROP TABLE IF EXISTS matches CASCADE;
         DROP TABLE IF EXISTS likes CASCADE;
         DROP TABLE IF EXISTS profiles CASCADE;
+        DROP TABLE IF EXISTS warnings CASCADE;
 
         -- Profiles table
         CREATE TABLE profiles (
@@ -60,17 +61,28 @@ async function setupDatabase() {
           "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
 
+        -- Warnings table
+        CREATE TABLE warnings (
+          id TEXT PRIMARY KEY,
+          "userId" TEXT NOT NULL,
+          message TEXT NOT NULL,
+          "isRead" BOOLEAN DEFAULT false,
+          "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+
         -- Enable Row Level Security
         ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
         ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
         ALTER TABLE matches ENABLE ROW LEVEL SECURITY;
         ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE warnings ENABLE ROW LEVEL SECURITY;
 
         -- Create policies for public access (MVP - no auth restrictions for now)
         CREATE POLICY "Allow all operations on profiles" ON profiles FOR ALL USING (true) WITH CHECK (true);
         CREATE POLICY "Allow all operations on likes" ON likes FOR ALL USING (true) WITH CHECK (true);
         CREATE POLICY "Allow all operations on matches" ON matches FOR ALL USING (true) WITH CHECK (true);
         CREATE POLICY "Allow all operations on messages" ON messages FOR ALL USING (true) WITH CHECK (true);
+        CREATE POLICY "Allow all operations on warnings" ON warnings FOR ALL USING (true) WITH CHECK (true);
 
         -- Create indexes for performance
         CREATE INDEX idx_likes_from ON likes("fromUserId");
@@ -79,6 +91,8 @@ async function setupDatabase() {
         CREATE INDEX idx_matches_user2 ON matches("user2Id");
         CREATE INDEX idx_messages_match ON messages("matchId");
         CREATE INDEX idx_messages_created ON messages("createdAt" DESC);
+        CREATE INDEX idx_warnings_user ON warnings("userId");
+        CREATE INDEX idx_warnings_unread ON warnings("userId", "isRead");
       `
     });
 
@@ -132,6 +146,16 @@ async function setupDatabase() {
         );
       `);
 
+      await executeSQL(supabase, `
+        CREATE TABLE IF NOT EXISTS warnings (
+          id TEXT PRIMARY KEY,
+          "userId" TEXT NOT NULL,
+          message TEXT NOT NULL,
+          "isRead" BOOLEAN DEFAULT false,
+          "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `);
+
       console.log('✅ Tables created successfully!');
     } else {
       console.log('✅ Database schema created successfully!');
@@ -149,7 +173,8 @@ async function setupDatabase() {
       console.log('   - profiles');
       console.log('   - likes');
       console.log('   - matches');
-      console.log('   - messages\n');
+      console.log('   - messages');
+      console.log('   - warnings\n');
       console.log('🎉 Database setup complete! Ready to build the app!\n');
     }
 
@@ -211,17 +236,28 @@ CREATE TABLE messages (
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Warnings table
+CREATE TABLE warnings (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  message TEXT NOT NULL,
+  "isRead" BOOLEAN DEFAULT false,
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Enable Row Level Security
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE warnings ENABLE ROW LEVEL SECURITY;
 
 -- Create policies
 CREATE POLICY "Allow all operations on profiles" ON profiles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on likes" ON likes FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on matches" ON matches FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on messages" ON messages FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations on warnings" ON warnings FOR ALL USING (true) WITH CHECK (true);
 
 -- Create indexes
 CREATE INDEX idx_likes_from ON likes("fromUserId");
@@ -230,6 +266,8 @@ CREATE INDEX idx_matches_user1 ON matches("user1Id");
 CREATE INDEX idx_matches_user2 ON matches("user2Id");
 CREATE INDEX idx_messages_match ON messages("matchId");
 CREATE INDEX idx_messages_created ON messages("createdAt" DESC);
+CREATE INDEX idx_warnings_user ON warnings("userId");
+CREATE INDEX idx_warnings_unread ON warnings("userId", "isRead");
 `;
 }
 

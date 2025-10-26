@@ -113,6 +113,26 @@ async function handleLogin(request) {
       )
     }
 
+    // Check if user is banned
+    const { data: ban } = await supabase
+      .from('banned_users')
+      .select('*')
+      .eq('userId', user.id)
+      .eq('isActive', true)
+      .single()
+
+    if (ban) {
+      return NextResponse.json(
+        { 
+          error: 'Your account has been banned',
+          banned: true,
+          reason: ban.reason,
+          bannedAt: ban.bannedAt
+        },
+        { status: 403 }
+      )
+    }
+
     const { password: _, ...userWithoutPassword } = user
     return NextResponse.json({ user: userWithoutPassword })
   } catch (error) {
@@ -501,6 +521,447 @@ async function handleUpdateOnlineStatus(request) {
   }
 }
 
+// Admin Routes
+// Admin credentials (in production, store this securely in database)
+const ADMIN_CREDENTIALS = {
+  username: 'admin',
+  password: hashPassword('admin123') // Change this password!
+}
+
+async function handleAdminLogin(request) {
+  try {
+    const body = await request.json()
+    const { username, password } = body
+
+    if (username === ADMIN_CREDENTIALS.username && verifyPassword(password, ADMIN_CREDENTIALS.password)) {
+      return NextResponse.json({
+        success: true,
+        admin: { username: 'admin', role: 'admin' }
+      })
+    }
+
+    return NextResponse.json(
+      { error: 'Invalid admin credentials' },
+      { status: 401 }
+    )
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleAdminGetUsers(request) {
+  try {
+    const url = new URL(request.url)
+    const sortBy = url.searchParams.get('sortBy') || 'createdAt'
+    
+    // Get all users with their stats
+    const { data: users, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order(sortBy, { ascending: false })
+
+    if (error) throw error
+
+    // Get match counts for each user
+    const usersWithStats = await Promise.all(users.map(async (user) => {
+      const { count: matchCount } = await supabase
+        .from('matches')
+        .select('*', { count: 'exact', head: true })
+        .or(`userId1.eq.${user.id},userId2.eq.${user.id}`)
+
+      const { count: likesSent } = await supabase
+        .from('likes')
+        .select('*', { count: 'exact', head: true })
+        .eq('likerId', user.id)
+
+      const { count: likesReceived } = await supabase
+        .from('likes')
+        .select('*', { count: 'exact', head: true })
+        .eq('likedId', user.id)
+
+      return {
+        ...user,
+        matchCount: matchCount || 0,
+        likesSent: likesSent || 0,
+        likesReceived: likesReceived || 0,
+        isOnline: onlineUsers.has(user.id)
+      }
+    }))
+
+    return NextResponse.json({ users: usersWithStats })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleAdminGetConversations(request) {
+  try {
+    // Get all matches with user details
+    const { data: matches, error } = await supabase
+      .from('matches')
+      .select('*')
+      .order('createdAt', { ascending: false })
+
+    if (error) throw error
+
+    // Get user details and message counts for each match
+    const conversationsWithDetails = await Promise.all(matches.map(async (match) => {
+      const { data: user1 } = await supabase
+        .from('profiles')
+        .select('id, name, email, photo_url, department, year')
+        .eq('id', match.user1Id)
+        .single()
+
+      const { data: user2 } = await supabase
+        .from('profiles')
+        .select('id, name, email, photo_url, department, year')
+        .eq('id', match.user2Id)
+        .single()
+
+      const { data: messages, count: messageCount } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact' })
+        .eq('matchId', match.id)
+        .order('createdAt', { ascending: false })
+
+      const lastMessage = messages && messages.length > 0 ? messages[0] : null
+
+      return {
+        matchId: match.id,
+        user1,
+        user2,
+        messageCount: messageCount || 0,
+        lastMessage,
+        createdAt: match.createdAt,
+        user1Online: onlineUsers.has(match.user1Id),
+        user2Online: onlineUsers.has(match.user2Id)
+      }
+    }))
+
+    return NextResponse.json({ conversations: conversationsWithDetails })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleAdminGetStats(request) {
+  try {
+    // Get total counts
+    const { count: totalUsers } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+
+    const { count: totalMatches } = await supabase
+      .from('matches')
+      .select('*', { count: 'exact', head: true })
+
+    const { count: totalMessages } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+
+    const { count: totalLikes } = await supabase
+      .from('likes')
+      .select('*', { count: 'exact', head: true })
+
+    // Get newly joined users (last 7 days)
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+    const { data: newUsers } = await supabase
+      .from('profiles')
+      .select('*')
+      .gte('createdAt', sevenDaysAgo.toISOString())
+      .order('createdAt', { ascending: false })
+
+    // Get online users count
+    const onlineCount = onlineUsers.size
+
+    return NextResponse.json({
+      stats: {
+        totalUsers: totalUsers || 0,
+        totalMatches: totalMatches || 0,
+        totalMessages: totalMessages || 0,
+        totalLikes: totalLikes || 0,
+        newUsers: newUsers || [],
+        onlineUsers: onlineCount
+      }
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleSendWarning(request) {
+  try {
+    const body = await request.json()
+    const { userId, message } = body
+
+    if (!userId || !message) {
+      return NextResponse.json(
+        { error: 'userId and message are required' },
+        { status: 400 }
+      )
+    }
+
+    // Create warning in database
+    const { data: warning, error } = await supabase
+      .from('warnings')
+      .insert({
+        id: uuidv4(),
+        userId,
+        message,
+        isRead: false,
+        createdAt: new Date().toISOString()
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      warning
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleGetWarnings(request) {
+  try {
+    const url = new URL(request.url)
+    const userId = url.searchParams.get('userId')
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'userId is required' },
+        { status: 400 }
+      )
+    }
+
+    // Get unread warnings for user
+    const { data: warnings, error } = await supabase
+      .from('warnings')
+      .select('*')
+      .eq('userId', userId)
+      .eq('isRead', false)
+      .order('createdAt', { ascending: false })
+
+    if (error) throw error
+
+    return NextResponse.json({ warnings: warnings || [] })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleMarkWarningAsRead(request) {
+  try {
+    const body = await request.json()
+    const { warningId } = body
+
+    if (!warningId) {
+      return NextResponse.json(
+        { error: 'warningId is required' },
+        { status: 400 }
+      )
+    }
+
+    const { error } = await supabase
+      .from('warnings')
+      .update({ isRead: true })
+      .eq('id', warningId)
+
+    if (error) throw error
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Ban/Unban User Functions
+async function handleBanUser(request) {
+  try {
+    const body = await request.json()
+    const { userId, reason, bannedBy } = body
+
+    if (!userId || !reason || !bannedBy) {
+      return NextResponse.json(
+        { error: 'userId, reason, and bannedBy are required' },
+        { status: 400 }
+      )
+    }
+
+    // Check if user is already banned
+    const { data: existingBan } = await supabase
+      .from('banned_users')
+      .select('*')
+      .eq('userId', userId)
+      .eq('isActive', true)
+      .single()
+
+    if (existingBan) {
+      return NextResponse.json(
+        { error: 'User is already banned' },
+        { status: 400 }
+      )
+    }
+
+    // Create ban record
+    const { data: ban, error } = await supabase
+      .from('banned_users')
+      .insert({
+        id: uuidv4(),
+        userId,
+        reason,
+        bannedBy,
+        bannedAt: new Date().toISOString(),
+        isActive: true
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    // Remove user from online users
+    onlineUsers.delete(userId)
+
+    return NextResponse.json({
+      success: true,
+      ban
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleUnbanUser(request) {
+  try {
+    const body = await request.json()
+    const { userId } = body
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'userId is required' },
+        { status: 400 }
+      )
+    }
+
+    // Deactivate ban
+    const { error } = await supabase
+      .from('banned_users')
+      .update({ isActive: false })
+      .eq('userId', userId)
+      .eq('isActive', true)
+
+    if (error) throw error
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleGetBannedUsers(request) {
+  try {
+    // Get all active bans with user details
+    const { data: bans, error } = await supabase
+      .from('banned_users')
+      .select('*')
+      .eq('isActive', true)
+      .order('bannedAt', { ascending: false })
+
+    if (error) throw error
+
+    // Get user details for each ban
+    const bansWithDetails = await Promise.all(
+      (bans || []).map(async (ban) => {
+        const { data: user } = await supabase
+          .from('profiles')
+          .select('id, name, email, photo_url, department, year')
+          .eq('id', ban.userId)
+          .single()
+
+        return {
+          ...ban,
+          user
+        }
+      })
+    )
+
+    return NextResponse.json({ bannedUsers: bansWithDetails })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleCheckBanStatus(request) {
+  try {
+    const url = new URL(request.url)
+    const userId = url.searchParams.get('userId')
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'userId is required' },
+        { status: 400 }
+      )
+    }
+
+    // Check if user is banned
+    const { data: ban, error } = await supabase
+      .from('banned_users')
+      .select('*')
+      .eq('userId', userId)
+      .eq('isActive', true)
+      .single()
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      throw error
+    }
+
+    return NextResponse.json({
+      isBanned: !!ban,
+      ban: ban || null
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
@@ -515,6 +976,18 @@ export async function GET(request) {
     return handleGetOnlineUsers(request)
   } else if (pathname.includes('/api/likes')) {
     return handleGetLikes(request)
+  } else if (pathname.includes('/api/admin/users')) {
+    return handleAdminGetUsers(request)
+  } else if (pathname.includes('/api/admin/conversations')) {
+    return handleAdminGetConversations(request)
+  } else if (pathname.includes('/api/admin/stats')) {
+    return handleAdminGetStats(request)
+  } else if (pathname.includes('/api/admin/banned-users')) {
+    return handleGetBannedUsers(request)
+  } else if (pathname.includes('/api/ban-status')) {
+    return handleCheckBanStatus(request)
+  } else if (pathname.includes('/api/warnings')) {
+    return handleGetWarnings(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -527,6 +1000,8 @@ export async function POST(request) {
     return handleSignup(request)
   } else if (pathname.includes('/api/auth/login')) {
     return handleLogin(request)
+  } else if (pathname.includes('/api/auth/admin-login')) {
+    return handleAdminLogin(request)
   } else if (pathname.includes('/api/profiles')) {
     return handleUpdateProfile(request)
   } else if (pathname.includes('/api/likes')) {
@@ -535,6 +1010,14 @@ export async function POST(request) {
     return handleSendMessage(request)
   } else if (pathname.includes('/api/online')) {
     return handleUpdateOnlineStatus(request)
+  } else if (pathname.includes('/api/admin/ban-user')) {
+    return handleBanUser(request)
+  } else if (pathname.includes('/api/admin/unban-user')) {
+    return handleUnbanUser(request)
+  } else if (pathname.includes('/api/admin/send-warning')) {
+    return handleSendWarning(request)
+  } else if (pathname.includes('/api/warnings/mark-read')) {
+    return handleMarkWarningAsRead(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
