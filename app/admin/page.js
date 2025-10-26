@@ -35,7 +35,10 @@ export default function AdminPanel() {
   const [showBanModal, setShowBanModal] = useState(false)
   const [banReason, setBanReason] = useState('')
   const [banningUser, setBanningUser] = useState(false)
-  const [unbanningUser, setUnbanningUser] = useState(false)
+  
+  // Banned users
+  const [bannedUsers, setBannedUsers] = useState([])
+  const [unbanningUserId, setUnbanningUserId] = useState(null)
 
   // Check if admin is logged in
   useEffect(() => {
@@ -107,6 +110,11 @@ export default function AdminPanel() {
       const convRes = await fetch('/api/admin/conversations')
       const convData = await convRes.json()
       setConversations(convData.conversations)
+      
+      // Load banned users
+      const bannedRes = await fetch('/api/admin/banned-users')
+      const bannedData = await bannedRes.json()
+      setBannedUsers(bannedData.bannedUsers || [])
     } catch (error) {
       console.error('Error loading admin data:', error)
     }
@@ -224,6 +232,34 @@ export default function AdminPanel() {
       toast.error('Error banning user: ' + error.message)
     } finally {
       setBanningUser(false)
+    }
+  }
+
+  const unbanUser = async (userId, userName) => {
+    if (!confirm(`Are you sure you want to unban ${userName}? They will be able to log in again.`)) {
+      return
+    }
+
+    setUnbanningUserId(userId)
+    try {
+      const response = await fetch('/api/admin/unban-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success(`${userName} has been unbanned`)
+        loadAdminData() // Refresh data
+      } else {
+        toast.error(data.error || 'Failed to unban user')
+      }
+    } catch (error) {
+      toast.error('Error unbanning user: ' + error.message)
+    } finally {
+      setUnbanningUserId(null)
     }
   }
 
@@ -385,10 +421,11 @@ export default function AdminPanel() {
 
         {/* Tabs */}
         <Tabs defaultValue="users" className="w-full">
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-3 mb-8">
+          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8">
             <TabsTrigger value="users">All Users</TabsTrigger>
             <TabsTrigger value="new">New Users</TabsTrigger>
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
+            <TabsTrigger value="banned">Banned Users</TabsTrigger>
           </TabsList>
 
           {/* All Users Tab */}
@@ -655,6 +692,75 @@ export default function AdminPanel() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Banned Users Tab */}
+          <TabsContent value="banned">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-red-600">
+                  <Ban className="h-5 w-5" />
+                  Banned Users
+                </CardTitle>
+                <CardDescription>
+                  Users who have been banned from the platform. You can unban them here.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {bannedUsers.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <Ban className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg">No banned users</p>
+                      <p className="text-sm">All users are currently in good standing</p>
+                    </div>
+                  ) : (
+                    bannedUsers.map((ban) => (
+                      <div key={ban.id} className="p-4 border-2 border-red-200 bg-red-50 rounded-lg">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-4 flex-1">
+                            <Avatar className="h-12 w-12 border-2 border-red-300">
+                              <AvatarImage src={ban.user?.photo_url} />
+                              <AvatarFallback className="bg-red-200">{ban.user?.name?.charAt(0) || 'U'}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-semibold text-lg">{ban.user?.name || 'Unknown User'}</h3>
+                                <Badge variant="destructive" className="text-xs">BANNED</Badge>
+                              </div>
+                              <p className="text-sm text-gray-600">{ban.user?.email}</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {ban.user?.department} • {ban.user?.year} Year
+                              </p>
+                              
+                              {/* Ban Details */}
+                              <div className="mt-3 p-3 bg-white rounded border border-red-200">
+                                <div className="text-xs text-gray-500 mb-1">Ban Reason:</div>
+                                <p className="text-sm font-medium text-red-800">{ban.reason}</p>
+                                <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                                  <span>Banned by: {ban.bannedBy}</span>
+                                  <span>Date: {new Date(ban.bannedAt).toLocaleDateString()}</span>
+                                  <span>Time: {new Date(ban.bannedAt).toLocaleTimeString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Unban Button */}
+                          <Button
+                            onClick={() => unbanUser(ban.userId, ban.user?.name)}
+                            disabled={unbanningUserId === ban.userId}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            {unbanningUserId === ban.userId ? 'Unbanning...' : 'Unban User'}
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
