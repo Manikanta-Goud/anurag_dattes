@@ -1,17 +1,20 @@
 -- Run this SQL in your Supabase SQL Editor to create the banned_users table
+-- IMPORTANT: Drop the old table first if it exists with wrong column names
 
-CREATE TABLE IF NOT EXISTS banned_users (
+DROP TABLE IF EXISTS banned_users;
+
+CREATE TABLE banned_users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "userId" UUID NOT NULL,
+  userid UUID NOT NULL,
   reason TEXT NOT NULL,
-  "bannedBy" TEXT NOT NULL,
-  "bannedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  "isActive" BOOLEAN DEFAULT true,
-  UNIQUE("userId")
+  bannedby TEXT NOT NULL,
+  bannedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  isactive BOOLEAN DEFAULT true,
+  UNIQUE(userid)
 );
 
-CREATE INDEX IF NOT EXISTS idx_banned_users_userId ON banned_users("userId");
-CREATE INDEX IF NOT EXISTS idx_banned_users_isActive ON banned_users("isActive");
+CREATE INDEX idx_banned_users_userid ON banned_users(userid);
+CREATE INDEX idx_banned_users_isactive ON banned_users(isactive);
 
 -- Test the table
 SELECT * FROM banned_users LIMIT 1;

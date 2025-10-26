@@ -117,8 +117,8 @@ async function handleLogin(request) {
     const { data: ban } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('userId', user.id)
-      .eq('isActive', true)
+      .eq('userid', user.id)
+      .eq('isactive', true)
       .single()
 
     if (ban) {
@@ -127,7 +127,7 @@ async function handleLogin(request) {
           error: 'Your account has been banned',
           banned: true,
           reason: ban.reason,
-          bannedAt: ban.bannedAt
+          bannedAt: ban.bannedat
         },
         { status: 403 }
       )
@@ -730,9 +730,57 @@ async function handleSendWarning(request) {
 
     if (error) throw error
 
+    // Count total warnings for this user (including the new one)
+    const { data: allWarnings, error: countError } = await supabase
+      .from('warnings')
+      .select('id')
+      .eq('userId', userId)
+
+    if (countError) throw countError
+
+    const warningCount = allWarnings?.length || 0
+
+    // Auto-ban if user has 5 or more warnings
+    if (warningCount >= 5) {
+      // Check if user is already banned
+      const { data: existingBan } = await supabase
+        .from('banned_users')
+        .select('*')
+        .eq('userid', userId)
+        .eq('isactive', true)
+        .single()
+
+      if (!existingBan) {
+        // Automatically ban the user
+        await supabase
+          .from('banned_users')
+          .insert({
+            id: uuidv4(),
+            userid: userId,
+            reason: `Automatically banned for receiving ${warningCount} warnings`,
+            bannedby: 'System (Auto-ban)',
+            bannedat: new Date().toISOString(),
+            isactive: true
+          })
+
+        // Remove from online users
+        onlineUsers.delete(userId)
+
+        return NextResponse.json({
+          success: true,
+          warning,
+          autoBanned: true,
+          warningCount,
+          message: `User has been automatically banned after receiving ${warningCount} warnings`
+        })
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      warning
+      warning,
+      warningCount,
+      message: warningCount >= 3 ? `Warning sent. User has ${warningCount} warnings total. Will be auto-banned at 5 warnings.` : 'Warning sent successfully'
     })
   } catch (error) {
     return NextResponse.json(
@@ -818,8 +866,8 @@ async function handleBanUser(request) {
     const { data: existingBan } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('userId', userId)
-      .eq('isActive', true)
+      .eq('userid', userId)
+      .eq('isactive', true)
       .single()
 
     if (existingBan) {
@@ -834,11 +882,11 @@ async function handleBanUser(request) {
       .from('banned_users')
       .insert({
         id: uuidv4(),
-        userId,
+        userid: userId,
         reason,
-        bannedBy,
-        bannedAt: new Date().toISOString(),
-        isActive: true
+        bannedby: bannedBy,
+        bannedat: new Date().toISOString(),
+        isactive: true
       })
       .select()
       .single()
@@ -873,15 +921,27 @@ async function handleUnbanUser(request) {
     }
 
     // Deactivate ban
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('banned_users')
-      .update({ isActive: false })
-      .eq('userId', userId)
-      .eq('isActive', true)
+      .update({ isactive: false })
+      .eq('userid', userId)
+      .eq('isactive', true)
+      .select()
 
     if (error) throw error
 
-    return NextResponse.json({ success: true })
+    if (!data || data.length === 0) {
+      return NextResponse.json(
+        { error: 'User is not currently banned or already unbanned' },
+        { status: 404 }
+      )
+    }
+
+    return NextResponse.json({ 
+      success: true,
+      message: 'User unbanned successfully',
+      unbannedRecords: data.length
+    })
   } catch (error) {
     return NextResponse.json(
       { error: error.message },
@@ -896,8 +956,8 @@ async function handleGetBannedUsers(request) {
     const { data: bans, error } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('isActive', true)
-      .order('bannedAt', { ascending: false })
+      .eq('isactive', true)
+      .order('bannedat', { ascending: false })
 
     if (error) throw error
 
@@ -907,7 +967,7 @@ async function handleGetBannedUsers(request) {
         const { data: user } = await supabase
           .from('profiles')
           .select('id, name, email, photo_url, department, year')
-          .eq('id', ban.userId)
+          .eq('id', ban.userid)
           .single()
 
         return {
@@ -942,8 +1002,8 @@ async function handleCheckBanStatus(request) {
     const { data: ban, error } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('userId', userId)
-      .eq('isActive', true)
+      .eq('userid', userId)
+      .eq('isactive', true)
       .single()
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned

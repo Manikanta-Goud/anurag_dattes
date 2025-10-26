@@ -176,9 +176,23 @@ export default function AdminPanel() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success(`Warning sent to ${selectedUserProfile.name}`)
+        if (data.autoBanned) {
+          toast.success(`⚠️ ${selectedUserProfile.name} has been AUTOMATICALLY BANNED after receiving ${data.warningCount} warnings!`, {
+            duration: 6000
+          })
+        } else if (data.warningCount >= 3) {
+          toast.warning(`Warning sent! ${selectedUserProfile.name} now has ${data.warningCount} warnings. Will be auto-banned at 5 warnings.`, {
+            duration: 5000
+          })
+        } else {
+          toast.success(`Warning sent to ${selectedUserProfile.name} (${data.warningCount} total warnings)`)
+        }
         closeWarningModal()
         closeUserProfile()
+        // Reload admin data to update banned users list if auto-banned
+        if (data.autoBanned) {
+          loadAdminData()
+        }
       } else {
         toast.error(data.error || 'Failed to send warning')
       }
@@ -241,7 +255,11 @@ export default function AdminPanel() {
     }
 
     setUnbanningUserId(userId)
+    
     try {
+      // Show loading toast
+      const loadingToast = toast.loading(`Unbanning ${userName}...`)
+      
       const response = await fetch('/api/admin/unban-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -251,10 +269,15 @@ export default function AdminPanel() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success(`${userName} has been unbanned`)
-        loadAdminData() // Refresh data
+        toast.success(`✅ ${userName} has been unbanned successfully!`, { id: loadingToast })
+        
+        // Optimistically remove from banned users list immediately
+        setBannedUsers(prev => prev.filter(ban => ban.userid !== userId))
+        
+        // Refresh full data in background
+        loadAdminData()
       } else {
-        toast.error(data.error || 'Failed to unban user')
+        toast.error(data.error || 'Failed to unban user', { id: loadingToast })
       }
     } catch (error) {
       toast.error('Error unbanning user: ' + error.message)
