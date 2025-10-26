@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase'
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null)
@@ -267,16 +268,19 @@ export default function App() {
       // Upload photo if it's a base64 preview
       let finalPhotoUrl = profileForm.photo_url
       if (profileForm.photo_url && !profileForm.photo_url.startsWith('http')) {
-        toast.info('Uploading photo...')
+        toast.loading('Uploading photo...', { id: 'setup-photo' })
         finalPhotoUrl = await uploadPhotoToServer(profileForm.photo_url)
         if (!finalPhotoUrl) {
           setLoading(false)
+          toast.error('Failed to upload photo. Please try again.', { id: 'setup-photo' })
           return
         }
+        toast.success('Photo uploaded!', { id: 'setup-photo' })
       }
 
       const interestsArray = profileForm.interests.split(',').map(i => i.trim()).filter(i => i)
       
+      toast.loading('Creating profile...', { id: 'setup-profile' })
       const response = await fetch('/api/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -291,13 +295,13 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success('Profile created successfully!')
+        toast.success('Profile created successfully!', { id: 'setup-profile' })
         setCurrentUser({ ...currentUser, ...data.profile })
         localStorage.setItem('currentUser', JSON.stringify({ ...currentUser, ...data.profile }))
         setView('main')
         loadProfiles(currentUser.id)
       } else {
-        toast.error(data.error || 'Failed to create profile')
+        toast.error(data.error || 'Failed to create profile', { id: 'setup-profile' })
       }
     } catch (error) {
       toast.error('Something went wrong!')
@@ -539,6 +543,7 @@ export default function App() {
     
     if (loading || uploadingPhoto) {
       console.log('Already processing, skipping...')
+      toast.warning('Please wait, already processing...')
       return
     }
     
@@ -551,17 +556,21 @@ export default function App() {
       // Upload photo if it's a base64 preview
       let finalPhotoUrl = profileForm.photo_url
       if (profileForm.photo_url && !profileForm.photo_url.startsWith('http')) {
-        console.log('Photo is base64, uploading to server...')
-        toast.info('Uploading photo...')
+        console.log('📸 Photo is base64, uploading to server...')
+        toast.loading('Uploading photo...', { id: 'photo-upload' })
+        
         finalPhotoUrl = await uploadPhotoToServer(profileForm.photo_url)
         console.log('Photo upload result:', finalPhotoUrl)
+        
         if (!finalPhotoUrl) {
           setLoading(false)
-          toast.error('Failed to upload photo. Please try again.')
-          console.error('Photo upload failed, stopping profile update')
+          toast.error('Failed to upload photo. Please try again.', { id: 'photo-upload' })
+          console.error('❌ Photo upload failed, stopping profile update')
           return
         }
-        toast.success('Photo uploaded successfully!')
+        
+        toast.success('Photo uploaded successfully!', { id: 'photo-upload' })
+        console.log('✅ Photo uploaded:', finalPhotoUrl)
       } else {
         console.log('Photo is already a URL or empty:', finalPhotoUrl)
       }
@@ -578,8 +587,8 @@ export default function App() {
         interests: interestsArray
       }
       
-      console.log('Sending profile update to API:', payload)
-      toast.info('Saving profile...')
+      console.log('💾 Sending profile update to API:', payload)
+      toast.loading('Saving profile...', { id: 'profile-save' })
       
       const response = await fetch('/api/profiles', {
         method: 'POST',
@@ -592,24 +601,35 @@ export default function App() {
       console.log('API response data:', data)
 
       if (response.ok) {
-        toast.success('Profile updated successfully!')
+        toast.success('Profile updated successfully!', { id: 'profile-save' })
         const updatedUser = { ...currentUser, ...data.profile }
-        console.log('Updated user object:', updatedUser)
+        console.log('✅ Updated user object:', updatedUser)
         setCurrentUser(updatedUser)
         localStorage.setItem('currentUser', JSON.stringify(updatedUser))
+        
+        // Update the profile form with new data
+        setProfileForm({
+          name: updatedUser.name || '',
+          bio: updatedUser.bio || '',
+          department: updatedUser.department || '',
+          year: updatedUser.year || '',
+          interests: updatedUser.interests ? updatedUser.interests.join(', ') : '',
+          photo_url: updatedUser.photo_url || ''
+        })
+        
         setIsEditingProfile(false)
         
         // Reload profiles to show updated data
-        console.log('Reloading profiles...')
+        console.log('🔄 Reloading profiles...')
         await loadProfiles(currentUser.id)
-        console.log('=== PROFILE UPDATE COMPLETED SUCCESSFULLY ===')
+        console.log('=== ✅ PROFILE UPDATE COMPLETED SUCCESSFULLY ===')
       } else {
-        console.error('Profile update failed:', data)
-        toast.error(data.error || 'Failed to update profile')
+        console.error('❌ Profile update failed:', data)
+        toast.error(data.error || 'Failed to update profile', { id: 'profile-save' })
       }
     } catch (error) {
-      console.error('Profile update error:', error)
-      toast.error('Something went wrong: ' + error.message)
+      console.error('❌ Profile update error:', error)
+      toast.error('Something went wrong: ' + error.message, { id: 'profile-save' })
     } finally {
       setLoading(false)
       console.log('=== PROFILE UPDATE FINISHED (loading set to false) ===')
@@ -658,40 +678,64 @@ export default function App() {
     }
 
     setUploadingPhoto(true)
+    console.log('🔄 Starting photo upload...')
 
     try {
-      console.log('Converting base64 to blob...')
       // Convert base64 to blob
+      console.log('📦 Converting base64 to blob...')
       const response = await fetch(photoUrl)
       const blob = await response.blob()
+      console.log('✅ Blob created:', blob.size, 'bytes', blob.type)
       
-      console.log('Uploading to imgbb...', blob.size, 'bytes')
-      // Upload to imgbb
-      const formData = new FormData()
-      formData.append('image', blob)
+      // Generate unique filename
+      const timestamp = Date.now()
+      const randomStr = Math.random().toString(36).substring(7)
+      const fileExtension = blob.type.split('/')[1] || 'jpg'
+      const fileName = `profile_${currentUser.id}_${timestamp}_${randomStr}.${fileExtension}`
+      console.log('📝 Generated filename:', fileName)
       
-      const uploadResponse = await fetch('https://api.imgbb.com/1/upload?key=dca0e0c77c2e6c435e54502aa4973a94', {
-        method: 'POST',
-        body: formData
-      })
+      // Upload to Supabase Storage
+      console.log('☁️ Uploading to Supabase Storage...')
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('profile-photos')
+        .upload(fileName, blob, {
+          contentType: blob.type,
+          cacheControl: '3600',
+          upsert: false
+        })
 
-      const data = await uploadResponse.json()
-      console.log('ImgBB response:', data)
-
-      if (data.success) {
-        setUploadingPhoto(false)
-        console.log('Photo uploaded successfully:', data.data.url)
-        return data.data.url
-      } else {
-        setUploadingPhoto(false)
-        console.error('ImgBB upload failed:', data)
-        toast.error('Failed to upload photo: ' + (data.error?.message || 'Unknown error'))
-        return null
+      if (uploadError) {
+        console.error('❌ Supabase upload error:', uploadError)
+        throw new Error(uploadError.message)
       }
-    } catch (error) {
-      console.error('Photo upload error:', error)
+
+      console.log('✅ File uploaded to Supabase:', uploadData)
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('profile-photos')
+        .getPublicUrl(fileName)
+
+      const publicUrl = urlData.publicUrl
+      console.log('🔗 Public URL generated:', publicUrl)
+
       setUploadingPhoto(false)
-      toast.error('Failed to upload photo: ' + error.message)
+      toast.success('Photo uploaded successfully!')
+      return publicUrl
+      
+    } catch (error) {
+      console.error('❌ Photo upload error:', error)
+      setUploadingPhoto(false)
+      
+      // Provide more specific error messages
+      if (error.message.includes('storage')) {
+        toast.error('Storage error: Please ensure the profile-photos bucket exists in Supabase')
+      } else if (error.message.includes('network')) {
+        toast.error('Network error: Please check your internet connection')
+      } else {
+        toast.error('Failed to upload photo: ' + error.message)
+      }
+      
       return null
     }
   }
