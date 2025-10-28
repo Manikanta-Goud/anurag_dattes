@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Shield, Users, MessageSquare, Heart, TrendingUp, Eye, LogOut, Search, Clock, Mail, AlertTriangle, X, User, Ban } from 'lucide-react'
+import { Shield, Users, MessageSquare, Heart, TrendingUp, Eye, LogOut, Search, Clock, Mail, AlertTriangle, X, User, Ban, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -35,6 +35,11 @@ export default function AdminPanel() {
   const [showBanModal, setShowBanModal] = useState(false)
   const [banReason, setBanReason] = useState('')
   const [banningUser, setBanningUser] = useState(false)
+  
+  // Delete user modal
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deletingUser, setDeletingUser] = useState(false)
   
   // Banned users
   const [bannedUsers, setBannedUsers] = useState([])
@@ -286,6 +291,58 @@ export default function AdminPanel() {
     }
   }
 
+  const openDeleteModal = (user) => {
+    setSelectedUserProfile(user)
+    setShowDeleteModal(true)
+    setDeletePassword('')
+  }
+
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false)
+    setDeletePassword('')
+  }
+
+  const deleteUser = async () => {
+    if (!deletePassword.trim()) {
+      toast.error('Please enter admin password to confirm deletion')
+      return
+    }
+
+    if (!confirm(`⚠️ PERMANENT DELETION WARNING!\n\nThis will permanently delete ${selectedUserProfile.name} and ALL their data including:\n• Profile\n• Messages\n• Matches\n• Likes\n• Warnings\n• Ban records\n\nThis action CANNOT be undone!\n\nAre you absolutely sure?`)) {
+      return
+    }
+
+    setDeletingUser(true)
+    try {
+      const loadingToast = toast.loading(`Deleting ${selectedUserProfile.name}...`)
+      
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: selectedUserProfile.id,
+          adminPassword: deletePassword
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success(`✅ ${selectedUserProfile.name} has been permanently deleted!`, { id: loadingToast })
+        closeDeleteModal()
+        closeUserProfile()
+        closeBanModal()
+        loadAdminData() // Refresh all data
+      } else {
+        toast.error(data.error || 'Failed to delete user', { id: loadingToast })
+      }
+    } catch (error) {
+      toast.error('Error deleting user: ' + error.message)
+    } finally {
+      setDeletingUser(false)
+    }
+  }
+
   // Filter users based on search
   const filteredUsers = (users || []).filter(user => 
     user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -475,32 +532,35 @@ export default function AdminPanel() {
               <CardContent>
                 <div className="space-y-3">
                   {filteredUsers.map((user) => (
-                    <div key={user.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center gap-4">
-                        <div className="relative">
-                          <Avatar className="h-12 w-12">
-                            <AvatarImage src={user.photo_url} />
-                            <AvatarFallback>{user.name?.charAt(0) || 'U'}</AvatarFallback>
-                          </Avatar>
-                          {user.isOnline && (
-                            <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-                          )}
-                        </div>
-                        <div>
-                          <h3 className="font-semibold flex items-center gap-2">
-                            {user.name}
-                            {user.isOnline && <Badge variant="outline" className="text-xs text-green-600 border-green-600">Online</Badge>}
-                          </h3>
-                          <div className="text-sm text-gray-600 flex items-center gap-2">
-                            <Mail className="h-3 w-3" />
-                            {user.email}
+                    <div key={user.id} className="p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start justify-between gap-4">
+                        {/* User Info Section */}
+                        <div className="flex items-center gap-4 flex-1">
+                          <div className="relative cursor-pointer" onClick={() => openUserProfile(user)}>
+                            <Avatar className="h-12 w-12 hover:ring-2 hover:ring-purple-400 transition-all">
+                              <AvatarImage src={user.photo_url} />
+                              <AvatarFallback>{user.name?.charAt(0) || 'U'}</AvatarFallback>
+                            </Avatar>
+                            {user.isOnline && (
+                              <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+                            )}
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            {user.department} • {user.year} Year
+                          <div className="flex-1">
+                            <h3 className="font-semibold flex items-center gap-2">
+                              {user.name}
+                              {user.isOnline && <Badge variant="outline" className="text-xs text-green-600 border-green-600">Online</Badge>}
+                            </h3>
+                            <div className="text-sm text-gray-600 flex items-center gap-2">
+                              <Mail className="h-3 w-3" />
+                              {user.email}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {user.department} • {user.year} Year • Joined {new Date(user.createdAt).toLocaleDateString()}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="text-right">
+
+                        {/* Stats Section */}
                         <div className="flex gap-4 text-sm">
                           <div className="text-center">
                             <div className="font-bold text-purple-600">{user.matchCount}</div>
@@ -515,10 +575,44 @@ export default function AdminPanel() {
                             <div className="text-xs text-gray-500">Received</div>
                           </div>
                         </div>
-                        <div className="text-xs text-gray-400 mt-2 flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Joined {new Date(user.createdAt).toLocaleDateString()}
-                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2 mt-4 pt-3 border-t">
+                        <Button
+                          onClick={() => openUserProfile(user)}
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          View Profile
+                        </Button>
+                        <Button
+                          onClick={() => openWarningModal(user)}
+                          size="sm"
+                          className="flex-1 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
+                        >
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          Warning
+                        </Button>
+                        <Button
+                          onClick={() => openBanModal(user)}
+                          size="sm"
+                          className="flex-1 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-700 hover:to-red-900"
+                        >
+                          <Ban className="h-3 w-3 mr-1" />
+                          Ban
+                        </Button>
+                        <Button
+                          onClick={() => openDeleteModal(user)}
+                          size="sm"
+                          variant="destructive"
+                          className="flex-1 bg-gradient-to-r from-red-800 to-red-950 hover:from-red-900 hover:to-black"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          Delete
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -584,9 +678,6 @@ export default function AdminPanel() {
                   <CardTitle>Active Conversations</CardTitle>
                   <CardDescription>
                     {conversations?.length || 0} total matches
-                    <div className="mt-2 text-xs bg-purple-50 p-2 rounded border border-purple-200">
-                      💡 <strong>Tip:</strong> Click on profile pictures to view user details and send warnings
-                    </div>
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="max-h-[600px] overflow-y-auto">
@@ -599,40 +690,20 @@ export default function AdminPanel() {
                         }`}
                       >
                         <div className="flex items-center gap-3 mb-3">
-                          <div 
-                            className="relative cursor-pointer hover:scale-110 transition-transform group"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openUserProfile(conv.user1)
-                            }}
-                            title={`Click to view ${conv.user1?.name}'s profile and send warning`}
-                          >
-                            <Avatar className="h-12 w-12 border-2 border-purple-200 group-hover:border-purple-500">
+                          <div className="relative">
+                            <Avatar className="h-12 w-12 border-2 border-purple-200">
                               <AvatarImage src={conv.user1?.photo_url} />
                               <AvatarFallback className="text-sm font-medium bg-purple-100">{conv.user1?.name?.charAt(0)}</AvatarFallback>
                             </Avatar>
                             {conv.user1Online && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-full">
-                              <User className="h-5 w-5 text-white" />
-                            </div>
                           </div>
                           <span className="text-sm">↔️</span>
-                          <div 
-                            className="relative cursor-pointer hover:scale-110 transition-transform group"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openUserProfile(conv.user2)
-                            }}
-                            title={`Click to view ${conv.user2?.name}'s profile and send warning`}
-                          >
-                            <Avatar className="h-12 w-12 border-2 border-purple-200 group-hover:border-purple-500">
+                          <div className="relative">
+                            <Avatar className="h-12 w-12 border-2 border-purple-200">
                               <AvatarImage src={conv.user2?.photo_url} />
                               <AvatarFallback className="text-sm font-medium bg-purple-100">{conv.user2?.name?.charAt(0)}</AvatarFallback>
                             </Avatar>
                             {conv.user2Online && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-full">
-                              <User className="h-5 w-5 text-white" />
-                            </div>
                           </div>
                         </div>
                         <div className="text-sm font-medium cursor-pointer hover:text-purple-600" onClick={() => viewConversation(conv)}>
@@ -898,6 +969,14 @@ export default function AdminPanel() {
                   </Button>
                 </div>
                 <Button
+                  onClick={() => openDeleteModal(selectedUserProfile)}
+                  variant="destructive"
+                  className="w-full bg-gradient-to-r from-red-800 to-red-950 hover:from-red-900 hover:to-black"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Account Permanently
+                </Button>
+                <Button
                   onClick={closeUserProfile}
                   variant="outline"
                   className="w-full"
@@ -1114,6 +1193,107 @@ export default function AdminPanel() {
                   onClick={closeBanModal}
                   variant="outline"
                   disabled={banningUser}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Delete User Modal */}
+      {showDeleteModal && selectedUserProfile && (
+        <div 
+          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+          onClick={closeDeleteModal}
+        >
+          <Card 
+            className="w-full max-w-lg border-4 border-red-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader className="bg-red-950 text-white">
+              <CardTitle className="flex items-center gap-2 text-2xl">
+                <Trash2 className="h-7 w-7" />
+                ⚠️ DELETE USER PERMANENTLY
+              </CardTitle>
+              <CardDescription className="text-red-200">
+                <strong>CRITICAL WARNING:</strong> This action will permanently delete this user and ALL their data from the database. This CANNOT be undone!
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-6">
+              {/* User Info */}
+              <div className="bg-red-50 border-2 border-red-400 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-14 w-14 border-2 border-red-600">
+                    <AvatarImage src={selectedUserProfile.photo_url} />
+                    <AvatarFallback className="bg-red-200">{selectedUserProfile.name?.charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-bold text-lg">{selectedUserProfile.name}</p>
+                    <p className="text-sm text-gray-700">{selectedUserProfile.email}</p>
+                    <p className="text-xs text-gray-600">{selectedUserProfile.department} • {selectedUserProfile.year} Year</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* What will be deleted */}
+              <div className="bg-red-100 border-2 border-red-400 rounded-lg p-4">
+                <h4 className="font-bold text-red-900 mb-3 flex items-center gap-2">
+                  <Trash2 className="h-4 w-4" />
+                  Data to be permanently deleted:
+                </h4>
+                <ul className="text-sm text-red-800 space-y-1 list-disc list-inside">
+                  <li>User profile and account</li>
+                  <li>All messages sent and received</li>
+                  <li>All matches and connections</li>
+                  <li>All likes (sent and received)</li>
+                  <li>All warnings</li>
+                  <li>Ban records (if any)</li>
+                </ul>
+              </div>
+
+              {/* Admin Password Confirmation */}
+              <div>
+                <label className="text-sm font-bold mb-2 block text-red-900">
+                  Enter Admin Password to Confirm (Required)
+                </label>
+                <Input
+                  type="password"
+                  placeholder="Enter admin password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  className="border-2 border-red-400 focus:border-red-600"
+                  disabled={deletingUser}
+                  autoFocus
+                />
+                <p className="text-xs text-gray-600 mt-1">
+                  You must enter your admin password to proceed with deletion.
+                </p>
+              </div>
+
+              {/* Warning Box */}
+              <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-3">
+                <p className="text-sm font-bold text-yellow-900">
+                  ⚠️ This action is IRREVERSIBLE. The user will be completely removed from the database and cannot be recovered.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={deleteUser}
+                  disabled={deletingUser || !deletePassword.trim()}
+                  className="flex-1 bg-gradient-to-r from-red-800 to-red-950 hover:from-red-900 hover:to-black text-white font-bold"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  {deletingUser ? 'Deleting...' : 'DELETE PERMANENTLY'}
+                </Button>
+                <Button
+                  onClick={closeDeleteModal}
+                  variant="outline"
+                  disabled={deletingUser}
+                  className="border-2"
                 >
                   Cancel
                 </Button>

@@ -1,4 +1,5 @@
 import './globals.css'
+import { Toaster } from 'sonner'
 
 export const metadata = {
   title: 'Next.js MongoDB Template',
@@ -10,6 +11,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         {children}
+        <Toaster position="top-center" richColors />
       </body>
     </html>
   )

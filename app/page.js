@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -40,6 +40,11 @@ export default function App() {
   const [warnings, setWarnings] = useState([]) // Store warnings
   const [unreadWarningsCount, setUnreadWarningsCount] = useState(0) // Count of unread warnings
   const [showNotifications, setShowNotifications] = useState(false) // Toggle notification dropdown
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [isSearching, setIsSearching] = useState(false)
 
   // Auth form state
   const [authForm, setAuthForm] = useState({
@@ -208,14 +213,69 @@ export default function App() {
     setLoading(true)
 
     try {
-      if (authMode === 'signup') {
-        // Validate email domain
-        if (!authForm.email.endsWith('@anurag.edu.in')) {
-          toast.error('Only @anurag.edu.in email addresses are allowed!')
-          setLoading(false)
-          return
+      // Validate College ID Format
+      const validateCollegeId = (email) => {
+        // Must end with @anurag.edu.in
+        if (!email.endsWith('@anurag.edu.in')) {
+          return {
+            valid: false,
+            message: 'Please login with your college ID: id@anurag.edu.in'
+          }
         }
 
+        // Extract ID part (before @)
+        const idPart = email.split('@')[0]
+
+        // College ID Format: YYegDDDSRR
+        // YY = batch year (2 digits)
+        // eg = fixed letters
+        // DDD = any 3-digit department code (e.g., 105, 206, 305, 449, 505)
+        // S = section (single letter a-z)
+        // RR = roll number (2 digits)
+        const collegeIdPattern = /^(\d{2})(eg)(\d{3})([a-z])(\d{2})$/i
+
+        const match = idPart.match(collegeIdPattern)
+
+        if (!match) {
+          return {
+            valid: false,
+            message: 'Invalid College ID format! Use format: your_rollnumber@anurag.edu.in'
+          }
+        }
+
+        const [, batchYear, eg, deptCode, section, rollNo] = match
+
+        // Additional validations
+        const currentYear = new Date().getFullYear() % 100 // Last 2 digits of current year
+        const batchNum = parseInt(batchYear)
+
+        // Batch year should be reasonable (not more than 10 years old, not future)
+        if (batchNum > currentYear || batchNum < currentYear - 10) {
+          return {
+            valid: false,
+            message: `Invalid batch year: ${batchYear}. Must be between ${currentYear - 10} and ${currentYear}`
+          }
+        }
+
+        // Roll number should be 01-99 (not 00)
+        if (parseInt(rollNo) === 0) {
+          return {
+            valid: false,
+            message: 'Invalid roll number. Roll number must be between 01 and 99'
+          }
+        }
+
+        return { valid: true }
+      }
+
+      const validation = validateCollegeId(authForm.email)
+      if (!validation.valid) {
+        toast.error(validation.message, { duration: 5000 })
+        setLoading(false)
+        return
+      }
+
+      if (authMode === 'signup') {
         const response = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -231,7 +291,11 @@ export default function App() {
           setProfileForm({ ...profileForm, name: authForm.name })
           setView('profile-setup')
         } else {
-          toast.error(data.error || 'Signup failed')
+          if (data.error?.includes('already exists') || data.error?.includes('duplicate')) {
+            toast.error('⚠️ This email is already registered! Please login instead.', { duration: 5000 })
+          } else {
+            toast.error(data.error || 'Signup failed')
+          }
         }
       } else {
         const response = await fetch('/api/auth/login', {
@@ -250,7 +314,11 @@ export default function App() {
           loadProfiles(data.user.id)
           loadMatches(data.user.id)
         } else {
-          toast.error(data.error || 'Login failed')
+          if (data.error?.includes('not found')) {
+            toast.error('❌ Account not found! Please signup first.', { duration: 5000 })
+          } else {
+            toast.error(data.error || 'Login failed')
+          }
         }
       }
     } catch (error) {
@@ -649,6 +717,82 @@ export default function App() {
     setIsEditingProfile(false)
   }
 
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+
+    setIsSearching(true)
+    try {
+      console.log('🔍 Searching for:', searchQuery)
+      console.log('👤 Current user ID:', currentUser.id)
+      
+      // Search in profiles by name, email, or department
+      const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
+      const data = await response.json()
+      
+      console.log('📊 Total profiles received from database:', data.profiles?.length)
+      console.log('📋 Sample profiles:', data.profiles?.slice(0, 3))
+      
+      if (response.ok && data.profiles) {
+        const query = searchQuery.toLowerCase().trim()
+        console.log('🔎 Search query (lowercase):', query)
+        
+        const filtered = data.profiles.filter(profile => {
+          // Search in multiple fields
+          const nameMatch = profile.name?.toLowerCase().includes(query)
+          const emailMatch = profile.email?.toLowerCase().includes(query)
+          const deptMatch = profile.department?.toLowerCase().includes(query)
+          const bioMatch = profile.bio?.toLowerCase().includes(query)
+          
+          const matches = nameMatch || emailMatch || deptMatch || bioMatch
+          
+          if (matches) {
+            console.log('✅ Match found:', {
+              email: profile.email,
+              name: profile.name,
+              department: profile.department,
+              matched_by: nameMatch ? 'name' : emailMatch ? 'email' : deptMatch ? 'department' : 'bio'
+            })
+          }
+          
+          return matches
+        })
+        
+        console.log('✅ Search complete. Results:', filtered.length, 'profiles found')
+        setSearchResults(filtered)
+        
+        if (filtered.length === 0) {
+          toast.info('No users found matching "' + searchQuery + '"')
+        } else {
+          toast.success(`Found ${filtered.length} user${filtered.length !== 1 ? 's' : ''}`)
+        }
+      } else {
+        console.error('❌ Failed to fetch profiles:', data)
+        toast.error('Failed to load profiles from database')
+      }
+    } catch (error) {
+      console.error('❌ Search error:', error)
+      toast.error('Failed to search users: ' + error.message)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  // Auto-search when query changes (with debounce)
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      const debounceTimer = setTimeout(() => {
+        handleSearch()
+      }, 500) // Wait 500ms after user stops typing
+      
+      return () => clearTimeout(debounceTimer)
+    } else {
+      setSearchResults([])
+    }
+  }, [searchQuery])
+
   const handlePhotoSelect = (file) => {
     // Validate file type
     if (!file.type.startsWith('image/')) {
@@ -886,16 +1030,21 @@ export default function App() {
                 </div>
               )}
               <div>
-                <label className="text-sm font-medium mb-2 block">Email</label>
+                <label className="text-sm font-medium mb-2 block">College ID</label>
                 <Input
                   type="email"
-                  placeholder="studentid@anurag.edu.in"
+                  placeholder="your_rollnumber@anurag.edu.in"
                   value={authForm.email}
-                  onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                  onChange={(e) => setAuthForm({ ...authForm, email: e.target.value.toLowerCase() })}
                   required
                 />
                 {authMode === 'signup' && (
-                  <p className="text-xs text-gray-500 mt-1">Only @anurag.edu.in emails allowed</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Format: YYegDDDSRR@anurag.edu.in (YY=batch, DDD=105/505, S=section, RR=roll no.)
+                  </p>
+                )}
+                {authMode === 'login' && (
+                  <p className="text-xs text-gray-500 mt-1">Use your college ID to login</p>
                 )}
               </div>
               <div>
@@ -1605,8 +1754,9 @@ export default function App() {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 overflow-x-hidden">
         <Tabs defaultValue="discover" className="w-full overflow-x-hidden">
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-8">
+          <TabsList className="grid w-full max-w-md mx-auto grid-cols-3 mb-8">
             <TabsTrigger value="discover">Discover</TabsTrigger>
+            <TabsTrigger value="search">Search</TabsTrigger>
             <TabsTrigger value="matches">Friends</TabsTrigger>
           </TabsList>
 
@@ -1960,6 +2110,191 @@ export default function App() {
             )}
           </TabsContent>
 
+          {/* Search Tab */}
+          <TabsContent value="search">
+            <div className="max-w-4xl mx-auto">
+              <div className="text-center mb-8">
+                <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 mb-2">
+                  Search Students
+                </h2>
+                <p className="text-gray-600">Find students by name, email, or department</p>
+              </div>
+
+              {/* Search Bar */}
+              <div className="mb-8">
+                <div className="flex gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <Input
+                      type="text"
+                      placeholder="Search by name, email, or department..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                      }}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSearch()
+                        }
+                      }}
+                      className="pl-12 h-14 text-lg border-2 focus:border-purple-500"
+                    />
+                  </div>
+                  <Button
+                    onClick={handleSearch}
+                    disabled={isSearching || !searchQuery.trim()}
+                    className="h-14 px-8 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                  >
+                    {isSearching ? 'Searching...' : 'Search'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Search Results */}
+              <div>
+                {/* Loading State */}
+                {isSearching && (
+                  <Card className="p-12">
+                    <div className="text-center text-gray-500">
+                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                      <p className="text-xl">Searching...</p>
+                      <p className="text-sm mt-2">Looking for "{searchQuery}"</p>
+                    </div>
+                  </Card>
+                )}
+
+                {/* No Results */}
+                {!isSearching && searchQuery && searchResults.length === 0 && (
+                  <Card className="p-12">
+                    <div className="text-center text-gray-500">
+                      <Search className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-xl font-semibold">No users found</p>
+                      <p className="text-sm mt-2">No one matches "{searchQuery}"</p>
+                      <p className="text-xs text-gray-400 mt-2">Try searching with different keywords like name, email, or department</p>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Empty State - Before Search */}
+                {!isSearching && !searchQuery && (
+                  <Card className="p-12">
+                    <div className="text-center text-gray-500">
+                      <Search className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-xl font-semibold">Start searching</p>
+                      <p className="text-sm mt-2">Enter a name, email, or department to find students</p>
+                      <div className="mt-4 text-xs text-gray-400">
+                        <p>💡 Try searching for:</p>
+                        <p>• Student name (e.g., "John", "Sarah")</p>
+                        <p>• Email ID (e.g., "23eg105")</p>
+                        <p>• Department (e.g., "CSE", "ECE")</p>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Search Results */}
+                {!isSearching && searchResults.length > 0 && (
+                  <div className="space-y-4">
+                    <p className="text-gray-600 mb-4">Found {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}</p>
+                    {searchResults.map((profile) => (
+                      <Card 
+                        key={profile.id} 
+                        className="hover:shadow-xl transition-all cursor-pointer hover:scale-[1.01]"
+                        onClick={() => {
+                          setSelectedProfile(profile)
+                          setShowProfileModal(true)
+                        }}
+                      >
+                        <CardContent className="p-6">
+                          <div className="flex items-start gap-6">
+                            {/* Profile Photo */}
+                            <div className="relative">
+                              <Avatar className="h-24 w-24 border-4 border-purple-200 group-hover:border-purple-400 transition-all">
+                                <AvatarImage src={profile.photo_url} />
+                                <AvatarFallback className="text-2xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
+                                  {profile.name?.charAt(0) || 'U'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 shadow-lg">
+                                <Eye className="h-4 w-4 text-purple-600" />
+                              </div>
+                            </div>
+
+                            {/* Profile Info */}
+                            <div className="flex-1">
+                              <h3 className="text-2xl font-bold mb-2 text-purple-900">{profile.name}</h3>
+                              <div className="space-y-2 text-sm text-gray-600">
+                                <p className="flex items-center gap-2">
+                                  <Mail className="h-4 w-4" />
+                                  {profile.email}
+                                </p>
+                                <p className="flex items-center gap-2">
+                                  <User className="h-4 w-4" />
+                                  {profile.department} • {profile.year} Year
+                                </p>
+                                {profile.bio && (
+                                  <p className="text-gray-700 mt-3 line-clamp-2">{profile.bio}</p>
+                                )}
+                                {profile.interests && profile.interests.length > 0 && (
+                                  <div className="flex flex-wrap gap-2 mt-3">
+                                    {profile.interests.slice(0, 3).map((interest, index) => (
+                                      <Badge key={index} variant="secondary" className="bg-purple-100 text-purple-700">
+                                        {interest}
+                                      </Badge>
+                                    ))}
+                                    {profile.interests.length > 3 && (
+                                      <Badge variant="secondary" className="bg-gray-100 text-gray-600">
+                                        +{profile.interests.length - 3} more
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation() // Prevent card click
+                                  setSelectedProfile(profile)
+                                  setShowProfileModal(true)
+                                }}
+                                variant="outline"
+                                className="border-2 border-purple-300 hover:bg-purple-50"
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View
+                              </Button>
+                              {!likedProfiles.has(profile.id) && (
+                                <Button
+                                  onClick={(e) => {
+                                    e.stopPropagation() // Prevent card click
+                                    handleLike(profile)
+                                  }}
+                                  className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                                >
+                                  <Heart className="h-4 w-4 mr-2" />
+                                  Like
+                                </Button>
+                              )}
+                              {likedProfiles.has(profile.id) && (
+                                <Button disabled variant="secondary">
+                                  <Heart className="h-4 w-4 mr-2 fill-current" />
+                                  Liked
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
           {/* Friends Tab */}
           <TabsContent value="matches">
             <div className="max-w-6xl mx-auto">
@@ -2169,6 +2504,134 @@ export default function App() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Full Profile Modal - Works for all tabs */}
+        {showProfileModal && selectedProfile && (
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            onClick={closeProfileView}
+          >
+            <div 
+              className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header with photo */}
+              <div className="relative h-80 bg-gradient-to-br from-pink-200 to-purple-200">
+                {selectedProfile.photo_url ? (
+                  <img 
+                    src={selectedProfile.photo_url} 
+                    alt={selectedProfile.name} 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <User className="h-32 w-32 text-gray-400" />
+                  </div>
+                )}
+                
+                {/* Close button */}
+                <button
+                  onClick={closeProfileView}
+                  className="absolute top-4 right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
+                >
+                  <X className="h-6 w-6 text-gray-700" />
+                </button>
+
+                {/* Gradient overlay for text visibility */}
+                <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/60 to-transparent"></div>
+                
+                {/* Name and basic info overlay */}
+                <div className="absolute bottom-6 left-6 right-6 text-white">
+                  <h1 className="text-4xl font-bold mb-2 drop-shadow-lg">
+                    {selectedProfile.name}
+                  </h1>
+                  {selectedProfile.department && selectedProfile.year && (
+                    <p className="text-lg opacity-95 drop-shadow-md">
+                      📚 {selectedProfile.department} • {selectedProfile.year} Year
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 space-y-6">
+                {/* Bio */}
+                {selectedProfile.bio && (
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                      <span className="text-2xl">💭</span>
+                      About
+                    </h3>
+                    <p className="text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
+                  </div>
+                )}
+
+                {/* Interests */}
+                {selectedProfile.interests && selectedProfile.interests.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                      <span className="text-2xl">🎯</span>
+                      Interests
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedProfile.interests.map((interest, idx) => (
+                        <Badge 
+                          key={idx} 
+                          variant="secondary" 
+                          className="text-sm px-4 py-2"
+                        >
+                          {interest}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Email */}
+                {selectedProfile.email && (
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                      <span className="text-2xl">📧</span>
+                      Contact
+                    </h3>
+                    <p className="text-gray-600">{selectedProfile.email}</p>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex gap-3 pt-4 border-t">
+                  <Button
+                    onClick={closeProfileView}
+                    variant="outline"
+                    className="flex-1 border-2"
+                  >
+                    Close
+                  </Button>
+                  {likedProfiles.has(selectedProfile.id) ? (
+                    <Button 
+                      disabled
+                      className="flex-1 bg-gray-400 cursor-not-allowed"
+                    >
+                      <Heart className="h-5 w-5 mr-2 fill-white" />
+                      Request Sent
+                    </Button>
+                  ) : (
+                    <Button 
+                      onClick={async () => {
+                        await handleLike(selectedProfile)
+                        closeProfileView()
+                      }}
+                      className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-base py-6"
+                    >
+                      <Heart className="h-5 w-5 mr-2" />
+                      Send Friend Request
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

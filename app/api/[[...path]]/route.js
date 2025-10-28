@@ -31,10 +31,34 @@ async function handleSignup(request) {
     const body = await request.json()
     const { email, password, name } = body
 
-    // Validate email domain
-    if (!email.endsWith('@anurag.edu.in')) {
+    // Validate College ID Format
+    const validateCollegeId = (email) => {
+      if (!email.endsWith('@anurag.edu.in')) {
+        return {
+          valid: false,
+          message: 'Please use your college ID: id@anurag.edu.in'
+        }
+      }
+
+      const idPart = email.split('@')[0]
+      // Format: YYegDDDSRR (e.g., 23eg105j13, 23eg305j13, 24eg206a05)
+      // DDD can be any 3-digit number (105, 206, 305, 449, 505, etc.)
+      const collegeIdPattern = /^(\d{2})(eg)(\d{3})([a-z])(\d{2})$/i
+
+      if (!collegeIdPattern.test(idPart)) {
+        return {
+          valid: false,
+          message: 'Invalid College ID format! Format: YYegDDDSRR@anurag.edu.in (e.g., 23eg105j13@anurag.edu.in)'
+        }
+      }
+
+      return { valid: true }
+    }
+
+    const validation = validateCollegeId(email)
+    if (!validation.valid) {
       return NextResponse.json(
-        { error: 'Only @anurag.edu.in email addresses are allowed' },
+        { error: validation.message },
         { status: 400 }
       )
     }
@@ -42,13 +66,13 @@ async function handleSignup(request) {
     // Check if user already exists
     const { data: existingUser } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, email')
       .eq('email', email)
       .single()
 
     if (existingUser) {
       return NextResponse.json(
-        { error: 'Email already registered' },
+        { error: 'This email is already registered! Please login instead.' },
         { status: 400 }
       )
     }
@@ -69,6 +93,12 @@ async function handleSignup(request) {
 
     if (error) {
       console.error('Signup error:', error)
+      if (error.code === '23505') { // Unique constraint violation
+        return NextResponse.json(
+          { error: 'This email is already registered! Please login instead.' },
+          { status: 400 }
+        )
+      }
       return NextResponse.json(
         { error: 'Failed to create account' },
         { status: 500 }
@@ -91,6 +121,14 @@ async function handleLogin(request) {
     const body = await request.json()
     const { email, password } = body
 
+    // Validate College ID Format
+    if (!email.endsWith('@anurag.edu.in')) {
+      return NextResponse.json(
+        { error: 'Please login with your college ID: id@anurag.edu.in' },
+        { status: 400 }
+      )
+    }
+
     // Find user
     const { data: user, error } = await supabase
       .from('profiles')
@@ -100,7 +138,7 @@ async function handleLogin(request) {
 
     if (error || !user) {
       return NextResponse.json(
-        { error: 'Invalid email or password' },
+        { error: 'Account not found! Please signup first.' },
         { status: 401 }
       )
     }
@@ -157,24 +195,33 @@ async function handleGetProfiles(request) {
       )
     }
 
-    // Get all profiles except current user (don't filter by likes)
+    console.log('🔍 Fetching all profiles for user:', userId)
+
+    // Get all profiles except current user
     const { data: profiles, error } = await supabase
       .from('profiles')
-      .select('id, name, bio, department, year, interests, photo_url, email')
+      .select('id, name, bio, department, year, interests, photo_url, email, createdAt')
       .neq('id', userId)
-      .limit(50)
+      .order('createdAt', { ascending: false })
 
     if (error) {
-      console.error('Get profiles error:', error)
+      console.error('❌ Get profiles error:', error)
       return NextResponse.json(
         { error: 'Failed to fetch profiles' },
         { status: 500 }
       )
     }
 
+    console.log('✅ Fetched', profiles?.length || 0, 'profiles from database')
+    
+    // Log some sample emails for debugging
+    if (profiles && profiles.length > 0) {
+      console.log('📧 Sample emails in database:', profiles.slice(0, 5).map(p => p.email))
+    }
+
     return NextResponse.json({ profiles: profiles || [] })
   } catch (error) {
-    console.error('Get profiles error:', error)
+    console.error('❌ Get profiles error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -1022,6 +1069,66 @@ async function handleCheckBanStatus(request) {
   }
 }
 
+// Delete User Function - Permanently remove account
+async function handleDeleteUser(request) {
+  try {
+    const body = await request.json()
+    const { userId, adminPassword } = body
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'userId is required' },
+        { status: 400 }
+      )
+    }
+
+    // Verify admin password for security
+    if (adminPassword !== 'admin123') {
+      return NextResponse.json(
+        { error: 'Invalid admin password' },
+        { status: 403 }
+      )
+    }
+
+    // Remove user from online users
+    onlineUsers.delete(userId)
+
+    // Delete all related data (cascade delete)
+    // 1. Delete warnings
+    await supabase.from('warnings').delete().eq('userId', userId)
+
+    // 2. Delete messages (both sent and received)
+    await supabase.from('messages').delete().or(`senderId.eq.${userId},receiverId.eq.${userId}`)
+
+    // 3. Delete matches
+    await supabase.from('matches').delete().or(`userId1.eq.${userId},userId2.eq.${userId}`)
+
+    // 4. Delete likes (both sent and received)
+    await supabase.from('likes').delete().or(`fromUserId.eq.${userId},toUserId.eq.${userId}`)
+
+    // 5. Delete ban records
+    await supabase.from('banned_users').delete().eq('userid', userId)
+
+    // 6. Finally, delete the user profile
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', userId)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      message: 'User and all related data deleted permanently'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
@@ -1078,6 +1185,8 @@ export async function POST(request) {
     return handleSendWarning(request)
   } else if (pathname.includes('/api/warnings/mark-read')) {
     return handleMarkWarningAsRead(request)
+  } else if (pathname.includes('/api/admin/delete-user')) {
+    return handleDeleteUser(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
