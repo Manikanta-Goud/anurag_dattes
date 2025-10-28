@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -46,6 +46,15 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
 
+  // Friend requests state
+  const [pendingRequests, setPendingRequests] = useState([])
+  const [sentRequests, setSentRequests] = useState(new Set())
+  const [friendRequests, setFriendRequests] = useState([])
+  
+  // Blocked users state
+  const [blockedUsers, setBlockedUsers] = useState(new Set())
+  const [blockedUsersList, setBlockedUsersList] = useState([]) // Full profile data
+
   // Auth form state
   const [authForm, setAuthForm] = useState({
     email: '',
@@ -71,6 +80,8 @@ export default function App() {
       setView('main')
       loadProfiles(JSON.parse(user).id)
       loadMatches(JSON.parse(user).id)
+      loadFriendRequests(JSON.parse(user).id)
+      loadBlockedUsers(JSON.parse(user).id)
     }
   }, [])
 
@@ -383,7 +394,9 @@ export default function App() {
       const response = await fetch(`/api/profiles?userId=${userId}`)
       const data = await response.json()
       if (response.ok) {
-        setProfiles(data.profiles || [])
+        // Filter out blocked users
+        const filtered = (data.profiles || []).filter(p => !blockedUsers.has(p.id))
+        setProfiles(filtered)
         
         // Load user's liked profiles to show request status
         const likesResponse = await fetch(`/api/likes?userId=${userId}`)
@@ -462,6 +475,179 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to load online users:', error)
+    }
+  }
+
+  const loadFriendRequests = async (userId) => {
+    try {
+      const response = await fetch(`/api/friend-request/pending?userId=${userId}`)
+      const data = await response.json()
+      if (response.ok) {
+        setFriendRequests(data || [])
+      }
+    } catch (error) {
+      console.error('Failed to load friend requests:', error)
+    }
+  }
+
+  const loadBlockedUsers = async (userId) => {
+    try {
+      const response = await fetch(`/api/blocked-users?userId=${userId}`)
+      const data = await response.json()
+      if (response.ok) {
+        const blockedIds = data.map(b => b.blocked_id)
+        setBlockedUsers(new Set(blockedIds))
+        
+        // Fetch full profile data for blocked users
+        if (blockedIds.length > 0) {
+          const profilesResponse = await fetch(`/api/profiles?userId=${userId}`)
+          const profilesData = await profilesResponse.json()
+          if (profilesResponse.ok) {
+            const blockedProfiles = profilesData.profiles.filter(p => blockedIds.includes(p.id))
+            setBlockedUsersList(blockedProfiles)
+          }
+        } else {
+          setBlockedUsersList([])
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load blocked users:', error)
+    }
+  }
+
+  const sendFriendRequest = async (receiverId) => {
+    try {
+      const response = await fetch('/api/friend-request/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: currentUser.id,
+          receiverId
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success('Friend request sent!')
+        // Optionally add to liked profiles to show "Request Sent"
+        setLikedProfiles(prev => new Set(prev).add(receiverId))
+      } else {
+        toast.error(data.error || 'Failed to send request')
+      }
+    } catch (error) {
+      toast.error('Failed to send friend request')
+    }
+  }
+
+  const acceptFriendRequest = async (request) => {
+    try {
+      const response = await fetch('/api/friend-request/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: request.id,
+          userId1: request.receiver_id,
+          userId2: request.sender_id
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success('Friend request accepted!')
+        loadFriendRequests(currentUser.id)
+        loadMatches(currentUser.id)
+      } else {
+        toast.error(data.error || 'Failed to accept request')
+      }
+    } catch (error) {
+      toast.error('Failed to accept friend request')
+    }
+  }
+
+  const rejectFriendRequest = async (requestId) => {
+    try {
+      const response = await fetch('/api/friend-request/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success('Request rejected')
+        loadFriendRequests(currentUser.id)
+      } else {
+        toast.error(data.error || 'Failed to reject request')
+      }
+    } catch (error) {
+      toast.error('Failed to reject request')
+    }
+  }
+
+  const blockUser = async (blockedId) => {
+    try {
+      const response = await fetch('/api/block-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          blockerId: currentUser.id,
+          blockedId
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success('User blocked - You can\'t chat anymore')
+        setBlockedUsers(prev => new Set(prev).add(blockedId))
+        // Remove from liked profiles so they can send request again when unblocked
+        setLikedProfiles(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(blockedId)
+          return newSet
+        })
+        // Reload matches to show blocked status
+        loadMatches(currentUser.id)
+        // Don't close the chat - let them see the blocked message
+      } else {
+        toast.error(data.error || 'Failed to block user')
+      }
+    } catch (error) {
+      toast.error('Failed to block user')
+    }
+  }
+
+  const removeFriend = async (friendId) => {
+    try {
+      const response = await fetch('/api/remove-friend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId1: currentUser.id,
+          userId2: friendId
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success('Friend removed')
+        // Remove from liked profiles so they can send request again
+        setLikedProfiles(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(friendId)
+          return newSet
+        })
+        loadMatches(currentUser.id)
+        setSelectedMatch(null)
+      } else {
+        toast.error(data.error || 'Failed to remove friend')
+      }
+    } catch (error) {
+      toast.error('Failed to remove friend')
     }
   }
 
@@ -740,6 +926,9 @@ export default function App() {
         console.log('🔎 Search query (lowercase):', query)
         
         const filtered = data.profiles.filter(profile => {
+          // Skip blocked users
+          if (blockedUsers.has(profile.id)) return false
+          
           // Search in multiple fields
           const nameMatch = profile.name?.toLowerCase().includes(query)
           const emailMatch = profile.email?.toLowerCase().includes(query)
@@ -1754,10 +1943,26 @@ export default function App() {
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 overflow-x-hidden">
         <Tabs defaultValue="discover" className="w-full overflow-x-hidden">
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-3 mb-8">
+          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-5 mb-8">
             <TabsTrigger value="discover">Discover</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
+            <TabsTrigger value="requests" className="relative">
+              Requests
+              {friendRequests.length > 0 && (
+                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  {friendRequests.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="matches">Friends</TabsTrigger>
+            <TabsTrigger value="blocked" className="relative">
+              Blocked
+              {blockedUsers.size > 0 && (
+                <span className="absolute -top-1 -right-1 h-5 w-5 bg-gray-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  {blockedUsers.size}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* Discover Tab */}
@@ -1798,20 +2003,6 @@ export default function App() {
                 </div>
               ) : (
                 <div className="relative pb-4">
-                  {/* Swipe Instructions with glassmorphism */}
-                  <div className="text-center mb-6 backdrop-blur-md bg-white/70 rounded-2xl p-4 border border-white/50 shadow-lg">
-                    <p className="text-base font-semibold text-transparent bg-clip-text bg-gradient-to-r from-pink-600 to-purple-600">
-                      Swipe right 💚 to send request • Swipe left ❌ to pass
-                    </p>
-                    <div className="flex items-center justify-center gap-2 mt-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-pink-500 to-purple-500 animate-pulse"></div>
-                      <p className="text-sm text-gray-700 font-medium">
-                        Profile {currentProfileIndex + 1} of {profiles.length}
-                      </p>
-                      <div className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 animate-pulse"></div>
-                    </div>
-                  </div>
-
                   {/* Swipe Card Container with 3D effect */}
                   <div className="swipe-container relative min-h-[600px] flex items-center justify-center mb-8" style={{ perspective: '1000px' }}>
                     {/* Background glow effects */}
@@ -1833,7 +2024,10 @@ export default function App() {
                         onTouchEnd={handleTouchEnd}
                       >
                         {/* Photo Section with enhanced gradient */}
-                        <div className="relative h-[450px] bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 overflow-hidden">
+                        <div 
+                          className="relative h-[450px] bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 overflow-hidden cursor-pointer"
+                          onClick={() => openProfileView(profiles[currentProfileIndex])}
+                        >
                           {profiles[currentProfileIndex].photo_url ? (
                             <img 
                               src={profiles[currentProfileIndex].photo_url} 
@@ -1872,19 +2066,33 @@ export default function App() {
                             )}
                           </div>
 
-                          {/* Enhanced already liked badge */}
-                          {likedProfiles.has(profiles[currentProfileIndex].id) && (
+                          {/* Enhanced already liked badge or Send Request button */}
+                          {likedProfiles.has(profiles[currentProfileIndex].id) ? (
                             <div className="absolute top-6 right-6 backdrop-blur-xl bg-green-500/90 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl animate-pulse border-2 border-white/50">
                               <div className="flex items-center gap-2">
                                 <Heart className="h-4 w-4 fill-white" />
                                 <span>Request Sent</span>
                               </div>
                             </div>
+                          ) : (
+                            <Button
+                              className="absolute top-6 right-6 backdrop-blur-xl bg-pink-500/90 hover:bg-pink-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                sendFriendRequest(profiles[currentProfileIndex].id)
+                              }}
+                            >
+                              <Heart className="h-4 w-4 mr-2" />
+                              Send Request
+                            </Button>
                           )}
                         </div>
 
                         {/* Quick Info Section with gradient background */}
-                        <CardContent className="p-6 bg-gradient-to-br from-white via-pink-50/30 to-purple-50/30 backdrop-blur-sm">
+                        <CardContent 
+                          className="p-6 bg-gradient-to-br from-white via-pink-50/30 to-purple-50/30 backdrop-blur-sm cursor-pointer"
+                          onClick={() => openProfileView(profiles[currentProfileIndex])}
+                        >
                           {/* Bio Preview */}
                           {profiles[currentProfileIndex].bio && (
                             <div className="mb-4 p-4 backdrop-blur-sm bg-white/60 rounded-2xl border border-white/50 shadow-md">
@@ -1928,17 +2136,6 @@ export default function App() {
                       <div className="absolute inset-0 bg-white/20 group-hover:bg-white/30 transition-all"></div>
                       <X className="h-10 w-10 text-white relative z-10" strokeWidth={3} />
                       <div className="absolute inset-0 bg-red-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
-                    </button>
-
-                    {/* Info Button */}
-                    <button
-                      onClick={() => openProfileView(profiles[currentProfileIndex])}
-                      className="relative w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 shadow-2xl hover:shadow-blue-500/50 transition-all border-4 border-white hover:scale-110 active:scale-95 flex items-center justify-center group overflow-hidden"
-                      aria-label="View Profile"
-                    >
-                      <div className="absolute inset-0 bg-white/20 group-hover:bg-white/30 transition-all"></div>
-                      <User className="h-7 w-7 text-white relative z-10" strokeWidth={3} />
-                      <div className="absolute inset-0 bg-blue-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
                     </button>
 
                     {/* Like Button */}
@@ -2001,14 +2198,6 @@ export default function App() {
                         <User className="h-32 w-32 text-gray-400" />
                       </div>
                     )}
-                    
-                    {/* Close button */}
-                    <button
-                      onClick={closeProfileView}
-                      className="absolute top-4 right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
-                    >
-                      <X className="h-6 w-6 text-gray-700" />
-                    </button>
 
                     {/* Gradient overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent"></div>
@@ -2073,37 +2262,6 @@ export default function App() {
                         </div>
                       </div>
                     )}
-
-                    {/* Action Buttons */}
-                    <div className="flex gap-3 pt-4 sticky bottom-0 bg-white pb-2">
-                      <Button 
-                        onClick={closeProfileView}
-                        variant="outline"
-                        className="flex-1 border-2"
-                      >
-                        Close
-                      </Button>
-                      {likedProfiles.has(selectedProfile.id) ? (
-                        <Button 
-                          disabled
-                          className="flex-1 bg-gray-400 cursor-not-allowed"
-                        >
-                          <Heart className="h-5 w-5 mr-2 fill-white" />
-                          Request Sent
-                        </Button>
-                      ) : (
-                        <Button 
-                          onClick={async () => {
-                            await handleLike(selectedProfile.id)
-                            closeProfileView()
-                          }}
-                          className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-base py-6"
-                        >
-                          <Heart className="h-5 w-5 mr-2" />
-                          Send Friend Request
-                        </Button>
-                      )}
-                    </div>
                   </div>
                 </div>
               </div>
@@ -2295,6 +2453,85 @@ export default function App() {
             </div>
           </TabsContent>
 
+          {/* Friend Requests Tab */}
+          <TabsContent value="requests">
+            <div className="max-w-4xl mx-auto">
+              <div className="text-center mb-8">
+                <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 mb-2">
+                  Friend Requests
+                </h2>
+                <p className="text-gray-600">Incoming friend requests</p>
+              </div>
+
+              {friendRequests.length === 0 ? (
+                <Card className="p-12">
+                  <div className="text-center text-gray-500">
+                    <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-xl font-semibold">No pending requests</p>
+                    <p className="text-sm mt-2">You don't have any friend requests at the moment</p>
+                  </div>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {friendRequests.map((request) => (
+                    <Card 
+                      key={request.id} 
+                      className="hover:shadow-xl transition-all"
+                    >
+                      <CardContent className="p-6">
+                        <div className="flex items-center gap-6">
+                          {/* Profile Photo */}
+                          <Avatar className="h-20 w-20 border-4 border-purple-200">
+                            <AvatarImage src={request.sender?.photo_url} />
+                            <AvatarFallback className="text-2xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
+                              {request.sender?.name?.charAt(0) || 'U'}
+                            </AvatarFallback>
+                          </Avatar>
+
+                          {/* Profile Info */}
+                          <div className="flex-1">
+                            <h3 className="text-2xl font-bold mb-1 text-purple-900">
+                              {request.sender?.name}
+                            </h3>
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <p className="flex items-center gap-2">
+                                <Mail className="h-4 w-4" />
+                                {request.sender?.email}
+                              </p>
+                              <p className="flex items-center gap-2">
+                                <User className="h-4 w-4" />
+                                {request.sender?.department} • {request.sender?.year} Year
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              onClick={() => acceptFriendRequest(request)}
+                              className="bg-green-500 hover:bg-green-600 text-white"
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Accept
+                            </Button>
+                            <Button
+                              onClick={() => rejectFriendRequest(request.id)}
+                              variant="outline"
+                              className="border-2 border-red-300 hover:bg-red-50 text-red-600"
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Reject
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
           {/* Friends Tab */}
           <TabsContent value="matches">
             <div className="max-w-6xl mx-auto">
@@ -2390,16 +2627,154 @@ export default function App() {
                                 </CardDescription>
                               </div>
                             </div>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              onClick={() => setSelectedMatch(null)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              {/* Show Remove Friend only if not blocked */}
+                              {!selectedMatch.isBlocked && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => {
+                                    if (confirm(`Remove ${selectedMatch.matchedUser?.name} from friends? You can send them a friend request again later from the Discover tab.`)) {
+                                      removeFriend(selectedMatch.matchedUser?.id)
+                                    }
+                                  }}
+                                  className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                  title="Remove Friend"
+                                >
+                                  <UserMinus className="h-4 w-4" />
+                                </Button>
+                              )}
+                              
+                              {/* Show Block/Unblock button based on status */}
+                              {selectedMatch.isBlocked && selectedMatch.blockedBy === 'me' ? (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (confirm(`Unblock ${selectedMatch.matchedUser?.name}? You will be able to chat normally again.`)) {
+                                      try {
+                                        const response = await fetch('/api/unblock-user', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({
+                                            blockerId: currentUser.id,
+                                            blockedId: selectedMatch.matchedUser?.id
+                                          })
+                                        })
+                                        if (response.ok) {
+                                          toast.success('User unblocked - You can chat now!')
+                                          setBlockedUsers(prev => {
+                                            const newSet = new Set(prev)
+                                            newSet.delete(selectedMatch.matchedUser?.id)
+                                            return newSet
+                                          })
+                                          loadMatches(currentUser.id)
+                                        } else {
+                                          toast.error('Failed to unblock user')
+                                        }
+                                      } catch (error) {
+                                        toast.error('Failed to unblock user')
+                                      }
+                                    }
+                                  }}
+                                  className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                  title="Unblock User"
+                                >
+                                  <UserPlus className="h-4 w-4" />
+                                </Button>
+                              ) : !selectedMatch.isBlocked && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => {
+                                    if (confirm(`Block ${selectedMatch.matchedUser?.name}? You won't be able to chat anymore.`)) {
+                                      blockUser(selectedMatch.matchedUser?.id)
+                                    }
+                                  }}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  title="Block User"
+                                >
+                                  <UserX className="h-4 w-4" />
+                                </Button>
+                              )}
+                              
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => setSelectedMatch(null)}
+                                title="Close Chat"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         </CardHeader>
-                        <CardContent id="chat-messages" className="flex-1 overflow-y-auto p-4">
+                        
+                        {/* Check if blocked */}
+                        {selectedMatch.isBlocked ? (
+                          <CardContent className="flex-1 flex items-center justify-center p-8">
+                            <div className="text-center max-w-md">
+                              <div className="mb-6">
+                                <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
+                                <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                                  You Can't Chat Anymore
+                                </h3>
+                                <p className="text-gray-600 leading-relaxed">
+                                  {selectedMatch.blockedBy === 'them' ? (
+                                    <>
+                                      <strong>{selectedMatch.matchedUser?.name}</strong> has blocked you.
+                                      <br />
+                                      You cannot send or receive messages from this user.
+                                    </>
+                                  ) : (
+                                    <>
+                                      You have blocked <strong>{selectedMatch.matchedUser?.name}</strong>.
+                                      <br />
+                                      No messages can be sent or received.
+                                    </>
+                                  )}
+                                </p>
+                              </div>
+                              {selectedMatch.blockedBy === 'me' && (
+                                <Button
+                                  onClick={async () => {
+                                    if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
+                                      try {
+                                        const response = await fetch('/api/unblock-user', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({
+                                            blockerId: currentUser.id,
+                                            blockedId: selectedMatch.matchedUser?.id
+                                          })
+                                        })
+                                        if (response.ok) {
+                                          toast.success('User unblocked')
+                                          setBlockedUsers(prev => {
+                                            const newSet = new Set(prev)
+                                            newSet.delete(selectedMatch.matchedUser?.id)
+                                            return newSet
+                                          })
+                                          loadMatches(currentUser.id)
+                                        } else {
+                                          toast.error('Failed to unblock user')
+                                        }
+                                      } catch (error) {
+                                        toast.error('Failed to unblock user')
+                                      }
+                                    }
+                                  }}
+                                  variant="outline"
+                                  className="border-2 border-purple-400 text-purple-600 hover:bg-purple-50"
+                                >
+                                  Unblock User
+                                </Button>
+                              )}
+                            </div>
+                          </CardContent>
+                        ) : (
+                          <>
+                            <CardContent id="chat-messages" className="flex-1 overflow-y-auto p-4">
                           <div className="space-y-4">
                             {messages.length === 0 ? (
                               <div className="text-center text-gray-500 py-12">
@@ -2489,6 +2864,8 @@ export default function App() {
                             </Button>
                           </form>
                         </div>
+                          </>
+                        )}
                       </Card>
                     ) : (
                       <Card className="h-[600px] flex items-center justify-center">
@@ -2499,6 +2876,104 @@ export default function App() {
                       </Card>
                     )}
                   </div>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Blocked Users Tab */}
+          <TabsContent value="blocked">
+            <div className="max-w-4xl mx-auto">
+              <div className="text-center mb-8">
+                <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-orange-600 to-yellow-600 mb-2">
+                  Blocked Users
+                </h2>
+                <p className="text-gray-600">Users you have blocked</p>
+              </div>
+
+              {blockedUsersList.length === 0 ? (
+                <Card className="p-12">
+                  <div className="text-center text-gray-500">
+                    <UserX className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-xl font-semibold">No blocked users</p>
+                    <p className="text-sm mt-2">You haven't blocked anyone yet</p>
+                  </div>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {blockedUsersList.map((user) => (
+                    <Card 
+                      key={user.id} 
+                      className="hover:shadow-xl transition-all"
+                    >
+                      <CardContent className="p-6">
+                        <div className="flex items-center gap-6">
+                          {/* Profile Photo */}
+                          <Avatar className="h-20 w-20 border-4 border-gray-200">
+                            <AvatarImage src={user.photo_url} />
+                            <AvatarFallback className="text-2xl bg-gradient-to-br from-gray-400 to-gray-600 text-white">
+                              {user.name?.charAt(0) || 'U'}
+                            </AvatarFallback>
+                          </Avatar>
+
+                          {/* Profile Info */}
+                          <div className="flex-1">
+                            <h3 className="text-2xl font-bold mb-1 text-gray-900">
+                              {user.name}
+                            </h3>
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <p className="flex items-center gap-2">
+                                <Mail className="h-4 w-4" />
+                                {user.email}
+                              </p>
+                              <p className="flex items-center gap-2">
+                                <User className="h-4 w-4" />
+                                {user.department} • {user.year} Year
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Unblock Button */}
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              onClick={async () => {
+                                if (confirm(`Unblock ${user.name}? You will be able to interact with them again.`)) {
+                                  try {
+                                    const response = await fetch('/api/unblock-user', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        blockerId: currentUser.id,
+                                        blockedId: user.id
+                                      })
+                                    })
+                                    if (response.ok) {
+                                      toast.success(`${user.name} unblocked successfully`)
+                                      setBlockedUsers(prev => {
+                                        const newSet = new Set(prev)
+                                        newSet.delete(user.id)
+                                        return newSet
+                                      })
+                                      loadBlockedUsers(currentUser.id)
+                                      loadMatches(currentUser.id)
+                                    } else {
+                                      toast.error('Failed to unblock user')
+                                    }
+                                  } catch (error) {
+                                    toast.error('Failed to unblock user')
+                                  }
+                                }
+                              }}
+                              className="bg-green-500 hover:bg-green-600 text-white"
+                            >
+                              <UserPlus className="h-4 w-4 mr-2" />
+                              Unblock
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
               )}
             </div>
@@ -2528,14 +3003,6 @@ export default function App() {
                     <User className="h-32 w-32 text-gray-400" />
                   </div>
                 )}
-                
-                {/* Close button */}
-                <button
-                  onClick={closeProfileView}
-                  className="absolute top-4 right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors"
-                >
-                  <X className="h-6 w-6 text-gray-700" />
-                </button>
 
                 {/* Gradient overlay for text visibility */}
                 <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/60 to-transparent"></div>

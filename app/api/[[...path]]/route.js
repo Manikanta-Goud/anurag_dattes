@@ -418,10 +418,31 @@ async function handleGetMatches(request) {
       )
     }
 
+    // Get blocked users for current user
+    const { data: blockedByMe } = await supabase
+      .from('blocked_users')
+      .select('blocked_id')
+      .eq('blocker_id', userId)
+
+    const { data: blockedMe } = await supabase
+      .from('blocked_users')
+      .select('blocker_id')
+      .eq('blocked_id', userId)
+
+    const blockedUserIds = new Set([
+      ...(blockedByMe || []).map(b => b.blocked_id),
+      ...(blockedMe || []).map(b => b.blocker_id)
+    ])
+
     // Get profile details for matched users
     const matchesWithProfiles = await Promise.all(
       (matches || []).map(async (match) => {
         const matchedUserId = match.user1Id === userId ? match.user2Id : match.user1Id
+        
+        // Check if this user is blocked
+        const isBlocked = blockedUserIds.has(matchedUserId)
+        const blockedBy = blockedMe?.find(b => b.blocker_id === matchedUserId) ? 'them' : 
+                         blockedByMe?.find(b => b.blocked_id === matchedUserId) ? 'me' : null
         
         const { data: matchedUser } = await supabase
           .from('profiles')
@@ -431,7 +452,9 @@ async function handleGetMatches(request) {
 
         return {
           ...match,
-          matchedUser
+          matchedUser,
+          isBlocked,
+          blockedBy
         }
       })
     )
@@ -1129,6 +1152,272 @@ async function handleDeleteUser(request) {
   }
 }
 
+// Friend Request handlers
+async function handleSendFriendRequest(request) {
+  try {
+    const { senderId, receiverId } = await request.json()
+
+    // Check if already sent
+    const { data: existing } = await supabase
+      .from('friend_requests')
+      .select('*')
+      .eq('sender_id', senderId)
+      .eq('receiver_id', receiverId)
+      .eq('status', 'pending')
+      .single()
+
+    if (existing) {
+      return NextResponse.json(
+        { error: 'Friend request already sent' },
+        { status: 400 }
+      )
+    }
+
+    // Check if blocked
+    const { data: blocked } = await supabase
+      .from('blocked_users')
+      .select('*')
+      .or(`and(blocker_id.eq.${senderId},blocked_id.eq.${receiverId}),and(blocker_id.eq.${receiverId},blocked_id.eq.${senderId})`)
+      .single()
+
+    if (blocked) {
+      return NextResponse.json(
+        { error: 'Cannot send friend request' },
+        { status: 403 }
+      )
+    }
+
+    // Insert friend request
+    const { data, error } = await supabase
+      .from('friend_requests')
+      .insert({
+        sender_id: senderId,
+        receiver_id: receiverId,
+        status: 'pending'
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      request: data
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleGetPendingRequests(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    // Get incoming friend requests with sender profiles
+    const { data, error } = await supabase
+      .from('friend_requests')
+      .select(`
+        *,
+        sender:profiles!friend_requests_sender_id_fkey(*)
+      `)
+      .eq('receiver_id', userId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    return NextResponse.json(data || [])
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleAcceptFriendRequest(request) {
+  try {
+    const { requestId, userId1, userId2 } = await request.json()
+
+    // Update friend request status
+    const { error: updateError } = await supabase
+      .from('friend_requests')
+      .update({ status: 'accepted' })
+      .eq('id', requestId)
+
+    if (updateError) throw updateError
+
+    // Create match with correct column names: user1Id and user2Id
+    const { error: matchError } = await supabase
+      .from('matches')
+      .insert({
+        id: `${Date.now()}-${userId1}-${userId2}`,
+        user1Id: userId1,
+        user2Id: userId2,
+        createdAt: new Date().toISOString()
+      })
+
+    if (matchError) throw matchError
+
+    return NextResponse.json({
+      success: true,
+      message: 'Friend request accepted'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleRejectFriendRequest(request) {
+  try {
+    const { requestId } = await request.json()
+
+    // Update status to rejected or delete
+    const { error } = await supabase
+      .from('friend_requests')
+      .update({ status: 'rejected' })
+      .eq('id', requestId)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      message: 'Friend request rejected'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Block user handlers
+async function handleBlockUser(request) {
+  try {
+    const { blockerId, blockedId } = await request.json()
+
+    // Insert block
+    const { data, error } = await supabase
+      .from('blocked_users')
+      .insert({
+        blocker_id: blockerId,
+        blocked_id: blockedId
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    // Don't delete matches - keep them in friends list but blocked
+    // User will see "You can't chat anymore" message
+    
+    // Delete any likes between the two users so they can send fresh requests later
+    await supabase
+      .from('likes')
+      .delete()
+      .or(`and(fromUserId.eq.${blockerId},toUserId.eq.${blockedId}),and(fromUserId.eq.${blockedId},toUserId.eq.${blockerId})`)
+
+    return NextResponse.json({
+      success: true,
+      message: 'User blocked'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleUnblockUser(request) {
+  try {
+    const { blockerId, blockedId } = await request.json()
+
+    const { error } = await supabase
+      .from('blocked_users')
+      .delete()
+      .eq('blocker_id', blockerId)
+      .eq('blocked_id', blockedId)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      message: 'User unblocked'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleGetBlockedUsers(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    const { data, error } = await supabase
+      .from('blocked_users')
+      .select('blocked_id')
+      .eq('blocker_id', userId)
+
+    if (error) throw error
+
+    return NextResponse.json(data || [])
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleRemoveFriend(request) {
+  try {
+    const { userId1, userId2 } = await request.json()
+
+    // Delete the match between the two users (correct column names: user1Id and user2Id)
+    const { error } = await supabase
+      .from('matches')
+      .delete()
+      .or(`and(user1Id.eq.${userId1},user2Id.eq.${userId2}),and(user1Id.eq.${userId2},user2Id.eq.${userId1})`)
+
+    if (error) throw error
+
+    // Delete any friend request entries to allow fresh requests
+    await supabase
+      .from('friend_requests')
+      .delete()
+      .or(`and(sender_id.eq.${userId1},receiver_id.eq.${userId2}),and(sender_id.eq.${userId2},receiver_id.eq.${userId1})`)
+
+    // Delete any likes between the two users so they can send fresh requests
+    await supabase
+      .from('likes')
+      .delete()
+      .or(`and(fromUserId.eq.${userId1},toUserId.eq.${userId2}),and(fromUserId.eq.${userId2},toUserId.eq.${userId1})`)
+
+    return NextResponse.json({
+      success: true,
+      message: 'Friend removed successfully'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
@@ -1155,6 +1444,10 @@ export async function GET(request) {
     return handleCheckBanStatus(request)
   } else if (pathname.includes('/api/warnings')) {
     return handleGetWarnings(request)
+  } else if (pathname.includes('/api/friend-request/pending')) {
+    return handleGetPendingRequests(request)
+  } else if (pathname.includes('/api/blocked-users')) {
+    return handleGetBlockedUsers(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -1187,6 +1480,18 @@ export async function POST(request) {
     return handleMarkWarningAsRead(request)
   } else if (pathname.includes('/api/admin/delete-user')) {
     return handleDeleteUser(request)
+  } else if (pathname.includes('/api/friend-request/send')) {
+    return handleSendFriendRequest(request)
+  } else if (pathname.includes('/api/friend-request/accept')) {
+    return handleAcceptFriendRequest(request)
+  } else if (pathname.includes('/api/friend-request/reject')) {
+    return handleRejectFriendRequest(request)
+  } else if (pathname.includes('/api/block-user')) {
+    return handleBlockUser(request)
+  } else if (pathname.includes('/api/unblock-user')) {
+    return handleUnblockUser(request)
+  } else if (pathname.includes('/api/remove-friend')) {
+    return handleRemoveFriend(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
