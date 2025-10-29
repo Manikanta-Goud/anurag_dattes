@@ -559,28 +559,36 @@ export default function App() {
     }
   }
 
-  const acceptFriendRequest = async (request) => {
+  const acceptFriendRequest = async (requestIdOrObject) => {
     try {
+      // Handle both cases: passing just ID or full request object
+      const requestId = typeof requestIdOrObject === 'string' ? requestIdOrObject : requestIdOrObject.id
+      const request = typeof requestIdOrObject === 'object' ? requestIdOrObject : null
+
+      console.log('✅ Accepting friend request:', { requestId, request })
+
       const response = await fetch('/api/friend-request/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requestId: request.id,
-          userId1: request.receiver_id,
-          userId2: request.sender_id
+          requestId: requestId,
+          userId1: request ? request.receiver_id : currentUser.id,
+          userId2: request ? request.sender_id : requestIdOrObject
         })
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        toast.success('Friend request accepted!')
-        loadFriendRequests(currentUser.id)
-        loadMatches(currentUser.id)
+        toast.success('Friend request accepted! You can now chat 🎉')
+        await loadFriendRequests(currentUser.id)
+        await loadMatches(currentUser.id)
       } else {
+        console.error('❌ Accept error:', data.error)
         toast.error(data.error || 'Failed to accept request')
       }
     } catch (error) {
+      console.error('❌ Accept friend request error:', error)
       toast.error('Failed to accept friend request')
     }
   }
@@ -2090,7 +2098,7 @@ export default function App() {
                           </Button>
                           <Button
                             onClick={() => {
-                              acceptFriendRequest(request.id)
+                              acceptFriendRequest(request)
                             }}
                             size="sm"
                             className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"

@@ -1217,21 +1217,67 @@ async function handleGetPendingRequests(request) {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
 
-    // Get incoming friend requests with sender profiles
-    const { data, error } = await supabase
+    console.log('📥 Loading friend requests for userId:', userId)
+
+    // Get incoming friend requests
+    const { data: requests, error } = await supabase
       .from('friend_requests')
-      .select(`
-        *,
-        sender:profiles!friend_requests_sender_id_fkey(*)
-      `)
+      .select('*')
       .eq('receiver_id', userId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
 
-    if (error) throw error
+    if (error) {
+      console.error('❌ Error loading friend requests:', error)
+      throw error
+    }
 
-    return NextResponse.json(data || [])
+    console.log('📋 Found', requests?.length || 0, 'friend requests')
+
+    // Get full sender profiles for each request
+    const requestsWithProfiles = await Promise.all(
+      (requests || []).map(async (req) => {
+        const { data: senderProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, name, bio, department, year, interests, photo_url, email')
+          .eq('id', req.sender_id)
+          .single()
+
+        if (profileError) {
+          console.error('❌ Error loading sender profile:', profileError)
+          return {
+            ...req,
+            name: 'Unknown User',
+            bio: '',
+            department: '',
+            year: '',
+            interests: [],
+            photo_url: '',
+            email: '',
+            requestedAt: req.created_at
+          }
+        }
+
+        console.log('✅ Loaded profile for sender:', senderProfile.name)
+
+        return {
+          id: req.id,
+          sender_id: req.sender_id,
+          receiver_id: req.receiver_id,
+          status: req.status,
+          created_at: req.created_at,
+          requestedAt: req.created_at,
+          // Spread all sender profile fields at the top level
+          ...senderProfile
+        }
+      })
+    )
+
+    console.log('✅ Returning', requestsWithProfiles.length, 'requests with full profiles')
+
+    return NextResponse.json(requestsWithProfiles)
   } catch (error) {
+    console.error('❌ Get pending requests error:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
@@ -1243,31 +1289,60 @@ async function handleAcceptFriendRequest(request) {
   try {
     const { requestId, userId1, userId2 } = await request.json()
 
+    console.log('✅ Accepting friend request:', { requestId, userId1, userId2 })
+
     // Update friend request status
     const { error: updateError } = await supabase
       .from('friend_requests')
       .update({ status: 'accepted' })
       .eq('id', requestId)
 
-    if (updateError) throw updateError
+    if (updateError) {
+      console.error('❌ Error updating friend request:', updateError)
+      throw updateError
+    }
+
+    // Check if match already exists to avoid duplicates
+    const { data: existingMatch } = await supabase
+      .from('matches')
+      .select('id')
+      .or(`and(user1Id.eq.${userId1},user2Id.eq.${userId2}),and(user1Id.eq.${userId2},user2Id.eq.${userId1})`)
+      .single()
+
+    if (existingMatch) {
+      console.log('⚠️ Match already exists, skipping creation')
+      return NextResponse.json({
+        success: true,
+        message: 'Friend request accepted (match already exists)'
+      })
+    }
 
     // Create match with correct column names: user1Id and user2Id
-    const { error: matchError } = await supabase
+    const matchId = uuidv4()
+    const { data: newMatch, error: matchError } = await supabase
       .from('matches')
       .insert({
-        id: `${Date.now()}-${userId1}-${userId2}`,
+        id: matchId,
         user1Id: userId1,
         user2Id: userId2,
         createdAt: new Date().toISOString()
       })
+      .select()
 
-    if (matchError) throw matchError
+    if (matchError) {
+      console.error('❌ Error creating match:', matchError)
+      throw matchError
+    }
+
+    console.log('✅ Match created successfully:', matchId)
 
     return NextResponse.json({
       success: true,
-      message: 'Friend request accepted'
+      message: 'Friend request accepted',
+      match: newMatch
     })
   } catch (error) {
+    console.error('❌ Accept friend request error:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
