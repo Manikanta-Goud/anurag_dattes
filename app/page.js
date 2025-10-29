@@ -581,15 +581,18 @@ export default function App() {
 
       if (response.ok) {
         toast.success('Friend request accepted! You can now chat 🎉')
-        await loadFriendRequests(currentUser.id)
+        // Only reload matches, not friend requests (will be removed from UI by caller)
         await loadMatches(currentUser.id)
+        return true
       } else {
         console.error('❌ Accept error:', data.error)
         toast.error(data.error || 'Failed to accept request')
+        return false
       }
     } catch (error) {
       console.error('❌ Accept friend request error:', error)
       toast.error('Failed to accept friend request')
+      return false
     }
   }
 
@@ -605,12 +608,15 @@ export default function App() {
 
       if (response.ok) {
         toast.success('Request rejected')
-        loadFriendRequests(currentUser.id)
+        // Don't reload list, will be removed from UI by caller
+        return true
       } else {
         toast.error(data.error || 'Failed to reject request')
+        return false
       }
     } catch (error) {
       toast.error('Failed to reject request')
+      return false
     }
   }
 
@@ -2083,7 +2089,7 @@ export default function App() {
                         )}
                         
                         {/* Action Buttons */}
-                        <div className="flex gap-2 pt-2">
+                        <div className="grid grid-cols-3 gap-2 pt-2">
                           <Button
                             onClick={() => {
                               openProfileView(request)
@@ -2091,30 +2097,35 @@ export default function App() {
                             }}
                             size="sm"
                             variant="outline"
-                            className="flex-1"
+                            className="w-full"
                           >
                             <Eye className="h-4 w-4 mr-1" />
-                            View Profile
+                            View
                           </Button>
                           <Button
-                            onClick={() => {
-                              acceptFriendRequest(request)
+                            onClick={async () => {
+                              await acceptFriendRequest(request)
+                              // Remove from list immediately
+                              setFriendRequests(prev => prev.filter(r => r.id !== request.id))
                             }}
                             size="sm"
-                            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+                            className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
                           >
                             <CheckCircle className="h-4 w-4 mr-1" />
                             Accept
                           </Button>
                           <Button
-                            onClick={() => {
-                              rejectFriendRequest(request.id)
+                            onClick={async () => {
+                              await rejectFriendRequest(request.id)
+                              // Remove from list immediately
+                              setFriendRequests(prev => prev.filter(r => r.id !== request.id))
                             }}
                             size="sm"
                             variant="outline"
-                            className="hover:bg-red-50 hover:border-red-300"
+                            className="w-full border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
                           >
-                            <XCircle className="h-4 w-4" />
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Reject
                           </Button>
                         </div>
                       </CardContent>
