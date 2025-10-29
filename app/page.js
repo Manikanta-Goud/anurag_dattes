@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,14 +14,16 @@ import { supabase } from '@/lib/supabase'
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null)
-  const [view, setView] = useState('landing') // landing, auth, profile-setup, main, profile
+  const [view, setView] = useState('landing') // landing, auth, profile-setup, main, profile, welcome
   const [authMode, setAuthMode] = useState('login') // login, signup
+  const [showWelcomeScreen, setShowWelcomeScreen] = useState(true) // Show welcome screen after login
   const [profiles, setProfiles] = useState([])
   const [matches, setMatches] = useState([])
   const [selectedMatch, setSelectedMatch] = useState(null)
   const [messages, setMessages] = useState([])
   const [messageInput, setMessageInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false) // Track if mobile chat page is open
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -39,7 +41,8 @@ export default function App() {
   const [unreadMessages, setUnreadMessages] = useState(new Set()) // Track which friends have unread messages
   const [warnings, setWarnings] = useState([]) // Store warnings
   const [unreadWarningsCount, setUnreadWarningsCount] = useState(0) // Count of unread warnings
-  const [showNotifications, setShowNotifications] = useState(false) // Toggle notification dropdown
+  const [showNotifications, setShowNotifications] = useState(false) // Toggle notification modal
+  const [showHelpModal, setShowHelpModal] = useState(false) // Toggle help modal
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -75,9 +78,12 @@ export default function App() {
   useEffect(() => {
     // Check if user is logged in
     const user = localStorage.getItem('currentUser')
+    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome')
     if (user) {
       setCurrentUser(JSON.parse(user))
       setView('main')
+      // Show welcome screen only if user hasn't seen it in this session
+      setShowWelcomeScreen(!hasSeenWelcome)
       loadProfiles(JSON.parse(user).id)
       loadMatches(JSON.parse(user).id)
       loadFriendRequests(JSON.parse(user).id)
@@ -95,6 +101,18 @@ export default function App() {
       return () => clearInterval(interval)
     }
   }, [selectedMatch])
+
+  // Auto-scroll for mobile chat
+  useEffect(() => {
+    if (isMobileChatOpen && messages.length > 0) {
+      setTimeout(() => {
+        const mobileChatContainer = document.getElementById('mobile-chat-messages')
+        if (mobileChatContainer) {
+          mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
+        }
+      }, 100)
+    }
+  }, [messages, isMobileChatOpen])
 
   useEffect(() => {
     // Check for unread messages from all friends
@@ -321,6 +339,7 @@ export default function App() {
           toast.success('Welcome back!')
           setCurrentUser(data.user)
           localStorage.setItem('currentUser', JSON.stringify(data.user))
+          setShowWelcomeScreen(true) // Show welcome screen first
           setView('main')
           loadProfiles(data.user.id)
           loadMatches(data.user.id)
@@ -1193,7 +1212,8 @@ export default function App() {
   // Auth Page
   if (view === 'auth') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex flex-col items-center justify-center p-4 py-8">
+        {/* Login/Signup Card */}
         <Card className="w-full max-w-md">
           <CardHeader>
             <div className="flex items-center justify-center mb-4">
@@ -1274,6 +1294,70 @@ export default function App() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Safety & Community Guidelines */}
+        <div className="w-full max-w-2xl mt-6">
+          <Card className="bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-center gap-3">
+                <div className="bg-gradient-to-br from-red-500 to-orange-600 rounded-full p-2">
+                  <AlertTriangle className="h-5 w-5 text-white" />
+                </div>
+                <CardTitle className="text-xl bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent">
+                  Safety & Community Guidelines
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              {/* Report Abuse */}
+              <div className="bg-white rounded-xl p-3 border-l-4 border-red-500">
+                <h4 className="font-bold text-red-700 text-sm mb-1.5 flex items-center gap-2">
+                  <UserX className="h-4 w-4" />
+                  Report Inappropriate Behavior
+                </h4>
+                <p className="text-xs text-gray-700 leading-relaxed">
+                  If anyone is messaging you in a <strong>bad, violent, or inappropriate manner</strong>, 
+                  please <strong>DM me immediately on Instagram</strong> (@anurag_slines). 
+                  I will take action within <strong>24 hours</strong> and ensure that account is suspended or banned.
+                </p>
+              </div>
+
+              {/* Warning System */}
+              <div className="bg-white rounded-xl p-3 border-l-4 border-orange-500">
+                <h4 className="font-bold text-orange-700 text-sm mb-1.5 flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Warning System
+                </h4>
+                <ul className="text-xs text-gray-700 space-y-1">
+                  <li className="flex items-start gap-2">
+                    <span className="text-orange-600 font-bold mt-0.5">1.</span>
+                    <span>First-time violators will receive a <strong>warning notification</strong></span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-orange-600 font-bold mt-0.5">2.</span>
+                    <span>After <strong>5 warnings</strong>, the account will be <strong>permanently banned</strong></span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-orange-600 font-bold mt-0.5">3.</span>
+                    <span>Severe violations may result in <strong>immediate ban</strong> without warnings</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Be Respectful */}
+              <div className="bg-white rounded-xl p-3 border-l-4 border-green-500">
+                <h4 className="font-bold text-green-700 text-sm mb-1.5 flex items-center gap-2">
+                  <Heart className="h-4 w-4" />
+                  Be Respectful & Kind
+                </h4>
+                <p className="text-xs text-gray-700 leading-relaxed">
+                  This platform is for making genuine connections. Please treat everyone with respect and kindness. 
+                  Let's build a positive community together! 💖
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     )
   }
@@ -1777,15 +1861,24 @@ export default function App() {
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 overflow-x-hidden">
       {/* Header */}
       <div className="bg-white border-b shadow-sm">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Heart className="h-8 w-8 text-pink-500 fill-pink-500" />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
+              <Heart className="h-6 w-6 md:h-8 md:w-8 text-pink-500 fill-pink-500" />
+              <h1 className="text-lg md:text-2xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
                 Anurag Connect
               </h1>
             </div>
-            <div className="flex items-center gap-2 md:gap-4">
+            <div className="flex items-center gap-1 md:gap-3">
+              {/* Help Button */}
+              <button
+                onClick={() => setShowHelpModal(true)}
+                className="relative p-2 hover:bg-gray-100 rounded-full transition-colors"
+                title="Help & Support"
+              >
+                <HelpCircle className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
+              </button>
+              
               {/* Notification Bell */}
               <div className="relative">
                 <button
@@ -1794,166 +1887,361 @@ export default function App() {
                   title="Notifications"
                 >
                   <Bell className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
-                  {unreadWarningsCount > 0 && (
+                  {(unreadWarningsCount > 0 || friendRequests.length > 0) && (
                     <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
-                      {unreadWarningsCount}
+                      {unreadWarningsCount + friendRequests.length}
                     </span>
                   )}
                 </button>
-                
-                {/* Notification Dropdown */}
-                {showNotifications && (
-                  <>
-                    {/* Mobile: Full screen overlay */}
-                    <div 
-                      className="fixed inset-0 bg-black/50 z-40 md:hidden"
-                      onClick={() => setShowNotifications(false)}
-                    />
-                    
-                    {/* Notification Panel */}
-                    <div className="fixed md:absolute left-0 right-0 md:left-auto md:right-0 bottom-0 md:bottom-auto md:top-full md:mt-2 md:w-96 bg-white md:rounded-lg shadow-2xl border-t md:border border-gray-200 z-50 max-h-[80vh] md:max-h-[500px] overflow-hidden flex flex-col">
-                      {/* Header */}
-                      <div className="flex-shrink-0 p-4 border-b bg-gradient-to-r from-red-50 to-pink-50 sticky top-0">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Bell className="h-5 w-5 text-red-600" />
-                            <h3 className="font-bold text-gray-800">Notifications</h3>
-                          </div>
-                          <button 
-                            onClick={() => setShowNotifications(false)}
-                            className="p-1 hover:bg-red-100 rounded-full transition-colors"
-                            aria-label="Close notifications"
-                          >
-                            <X className="h-5 w-5 text-gray-600" />
-                          </button>
-                        </div>
-                        {unreadWarningsCount > 0 && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <Badge variant="destructive" className="text-xs">
-                              {unreadWarningsCount} unread
-                            </Badge>
-                          </div>
-                        )}
-                      </div>
-                    
-                      {/* Notifications List */}
-                      <div className="flex-1 overflow-y-auto">
-                        {warnings.length === 0 ? (
-                          <div className="p-8 text-center text-gray-500">
-                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
-                              <Bell className="h-8 w-8 text-gray-400" />
-                            </div>
-                            <p className="text-sm font-medium">No notifications</p>
-                            <p className="text-xs text-gray-400 mt-1">You're all caught up!</p>
-                          </div>
-                        ) : (
-                          <div className="divide-y divide-gray-100">
-                            {warnings.map((warning, index) => (
-                              <div 
-                                key={warning.id} 
-                                className="p-4 hover:bg-red-50/50 transition-all duration-200 cursor-pointer group"
-                                style={{ animationDelay: `${index * 50}ms` }}
-                              >
-                                <div className="flex items-start gap-3">
-                                  {/* Icon */}
-                                  <div className="flex-shrink-0">
-                                    <div className="h-10 w-10 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
-                                      <AlertTriangle className="h-5 w-5 text-red-600" />
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Content */}
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-start justify-between gap-2 mb-1">
-                                      <div className="flex items-center gap-2">
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">
-                                          Warning
-                                        </span>
-                                        <span className="text-xs text-gray-500">
-                                          from Admin
-                                        </span>
-                                      </div>
-                                    </div>
-                                    
-                                    <p className="text-sm text-gray-900 leading-relaxed break-words mb-2">
-                                      {warning.message}
-                                    </p>
-                                    
-                                    <div className="flex items-center justify-between">
-                                      <p className="text-xs text-gray-500 flex items-center gap-1">
-                                        <span className="inline-block w-1 h-1 rounded-full bg-gray-400"></span>
-                                        {new Date(warning.createdAt).toLocaleDateString()} at {new Date(warning.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                      </p>
-                                      
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          markWarningAsRead(warning.id)
-                                        }}
-                                        className="text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-100 px-2 py-1 rounded transition-colors"
-                                      >
-                                        Dismiss
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Footer - Only show if there are notifications */}
-                      {warnings.length > 0 && (
-                        <div className="flex-shrink-0 p-3 border-t bg-gray-50 text-center">
-                          <button
-                            onClick={() => {
-                              warnings.forEach(w => markWarningAsRead(w.id))
-                            }}
-                            className="text-xs font-medium text-gray-600 hover:text-gray-900 transition-colors"
-                          >
-                            Clear all notifications
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
               </div>
               
               <button 
                 onClick={openMyProfile}
-                className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-3 py-2 transition-colors"
+                className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-2 md:px-3 py-2 transition-colors"
               >
-                <Avatar className="cursor-pointer">
+                <Avatar className="cursor-pointer h-7 w-7 md:h-9 md:w-9">
                   <AvatarImage src={currentUser?.photo_url} />
                   <AvatarFallback>{currentUser?.name?.charAt(0) || 'U'}</AvatarFallback>
                 </Avatar>
-                <span className="text-sm font-medium">{currentUser?.name}</span>
+                <span className="text-xs md:text-sm font-medium hidden sm:inline">{currentUser?.name}</span>
               </button>
-              <Button onClick={handleLogout} variant="outline" size="sm">
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
-              </Button>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Help Modal */}
+      {showHelpModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowHelpModal(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-6 rounded-t-3xl text-white">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 backdrop-blur-lg rounded-full p-3">
+                    <Mail className="h-8 w-8" />
+                  </div>
+                  <h2 className="text-2xl font-bold">Need Help?</h2>
+                </div>
+                <button 
+                  onClick={() => setShowHelpModal(false)}
+                  className="p-1 hover:bg-white/20 rounded-full transition-colors"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+              <p className="text-white/90">We're here to support you!</p>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4">
+              <div className="text-center space-y-3">
+                <p className="text-gray-700 font-medium">
+                  📱 For any queries, DM me on Instagram
+                </p>
+                
+                <a
+                  href="https://www.instagram.com/anurag_slines?utm_source=qr&igsh=ZThxb3B2MnNqaTJ1"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+                >
+                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                  </svg>
+                  @anurag_slines
+                </a>
+                
+                <p className="text-sm text-purple-600 font-semibold">
+                  👉 Follow for updates and announcements!
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notifications Modal */}
+      {showNotifications && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowNotifications(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex-shrink-0 p-4 md:p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50 sticky top-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Bell className="h-6 w-6 text-purple-600" />
+                  <h3 className="text-xl md:text-2xl font-bold text-gray-800">Notifications</h3>
+                </div>
+                <button 
+                  onClick={() => setShowNotifications(false)}
+                  className="p-2 hover:bg-purple-100 rounded-full transition-colors"
+                >
+                  <X className="h-5 w-5 text-gray-600" />
+                </button>
+              </div>
+              {(friendRequests.length > 0 || unreadWarningsCount > 0) && (
+                <div className="mt-3 flex items-center gap-2">
+                  {friendRequests.length > 0 && (
+                    <Badge className="bg-pink-500 text-xs">
+                      {friendRequests.length} friend request{friendRequests.length > 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                  {unreadWarningsCount > 0 && (
+                    <Badge variant="destructive" className="text-xs">
+                      {unreadWarningsCount} warning{unreadWarningsCount > 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Tabs */}
+            <Tabs defaultValue="requests" className="flex-1 flex flex-col">
+              <TabsList className="w-full grid grid-cols-2 rounded-none bg-gray-50">
+                <TabsTrigger value="requests" className="relative">
+                  Friend Requests
+                  {friendRequests.length > 0 && (
+                    <span className="ml-2 h-5 w-5 bg-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                      {friendRequests.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="warnings" className="relative">
+                  Warnings
+                  {unreadWarningsCount > 0 && (
+                    <span className="ml-2 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                      {unreadWarningsCount}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Friend Requests Tab */}
+              <TabsContent value="requests" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4" style={{maxHeight: 'calc(90vh - 180px)'}}>
+                {friendRequests.length === 0 ? (
+                  <div className="py-12 text-center text-gray-500">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
+                      <UserPlus className="h-8 w-8 text-gray-400" />
+                    </div>
+                    <p className="text-sm font-medium">No friend requests</p>
+                    <p className="text-xs text-gray-400 mt-1">You're all caught up!</p>
+                  </div>
+                ) : (
+                  friendRequests.map((request) => (
+                    <Card key={request.id} className="overflow-hidden hover:shadow-2xl transition-all border-2 border-purple-200">
+                      <div className="bg-gradient-to-br from-purple-100 to-pink-100 p-4">
+                        <div className="flex items-center gap-4">
+                          <Avatar className="h-20 w-20 border-4 border-white shadow-lg">
+                            <AvatarImage src={request.photo_url} />
+                            <AvatarFallback className="text-2xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
+                              {request.name?.charAt(0) || 'U'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xl font-bold text-purple-900">{request.name}</h4>
+                            <p className="text-sm text-gray-700">{request.department} • Year {request.year}</p>
+                            <p className="text-xs text-gray-600 mt-1">
+                              📅 Sent {new Date(request.requestedAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <CardContent className="p-4 space-y-3">
+                        {/* Bio */}
+                        {request.bio && (
+                          <div>
+                            <p className="text-sm text-gray-700 line-clamp-2">{request.bio}</p>
+                          </div>
+                        )}
+                        
+                        {/* Interests */}
+                        {request.interests && request.interests.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-gray-600 mb-1">Interests:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {request.interests.slice(0, 3).map((interest, idx) => (
+                                <Badge key={idx} variant="secondary" className="text-xs">
+                                  {interest}
+                                </Badge>
+                              ))}
+                              {request.interests.length > 3 && (
+                                <Badge variant="secondary" className="text-xs">
+                                  +{request.interests.length - 3} more
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Action Buttons */}
+                        <div className="flex gap-2 pt-2">
+                          <Button
+                            onClick={() => {
+                              openProfileView(request)
+                              setShowNotifications(false)
+                            }}
+                            size="sm"
+                            variant="outline"
+                            className="flex-1"
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Profile
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              acceptFriendRequest(request.id)
+                            }}
+                            size="sm"
+                            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Accept
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              rejectFriendRequest(request.id)
+                            }}
+                            size="sm"
+                            variant="outline"
+                            className="hover:bg-red-50 hover:border-red-300"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </TabsContent>
+
+              {/* Warnings Tab */}
+              <TabsContent value="warnings" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3" style={{maxHeight: 'calc(90vh - 180px)'}}>
+                {warnings.length === 0 ? (
+                  <div className="py-12 text-center text-gray-500">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
+                      <Bell className="h-8 w-8 text-gray-400" />
+                    </div>
+                    <p className="text-sm font-medium">No warnings</p>
+                    <p className="text-xs text-gray-400 mt-1">Keep being awesome!</p>
+                  </div>
+                ) : (
+                  warnings.map((warning) => (
+                    <div key={warning.id} className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-4 border-2 border-red-200 hover:shadow-lg transition-all">
+                      <div className="flex items-start gap-3">
+                        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center flex-shrink-0">
+                          <AlertTriangle className="h-5 w-5 text-red-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">
+                              Warning from Admin
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-900 leading-relaxed mb-2">
+                            {warning.message}
+                          </p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs text-gray-500">
+                              {new Date(warning.createdAt).toLocaleDateString()} at {new Date(warning.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            <button
+                              onClick={() => markWarningAsRead(warning.id)}
+                              className="text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-100 px-3 py-1 rounded transition-colors"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+                
+                {warnings.length > 0 && (
+                  <div className="pt-3 border-t text-center">
+                    <button
+                      onClick={() => {
+                        warnings.forEach(w => markWarningAsRead(w.id))
+                      }}
+                      className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                    >
+                      Clear all warnings
+                    </button>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 overflow-x-hidden">
+        {/* Welcome Screen Overlay */}
+        {showWelcomeScreen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full animate-in fade-in zoom-in duration-300">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-8 rounded-t-3xl text-white text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="bg-white/20 backdrop-blur-lg rounded-full p-4">
+                    <Heart className="h-12 w-12" />
+                  </div>
+                </div>
+                <h2 className="text-3xl font-bold mb-2">Welcome to Anurag Connect!</h2>
+                <p className="text-white/90 text-lg">Let's get started! 🚀</p>
+              </div>
+
+              {/* Content */}
+              <div className="p-8 space-y-6">
+                {/* Welcome Info */}
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-6 border-2 border-purple-200">
+                  <div className="flex items-start gap-4">
+                    <div className="bg-purple-500 rounded-full p-3 flex-shrink-0">
+                      <Users className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-purple-900 mb-2 text-lg">Start Making Connections!</h3>
+                      <p className="text-sm text-gray-700">
+                        Find friends, make connections, and build meaningful relationships. 
+                        Be respectful and enjoy your experience! 💖
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Features */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white border-2 border-pink-200 rounded-xl p-4 text-center">
+                    <MessageCircle className="h-8 w-8 text-pink-500 mx-auto mb-2" />
+                    <p className="text-xs font-semibold text-gray-700">Chat with Friends</p>
+                  </div>
+                  <div className="bg-white border-2 border-purple-200 rounded-xl p-4 text-center">
+                    <Search className="h-8 w-8 text-purple-500 mx-auto mb-2" />
+                    <p className="text-xs font-semibold text-gray-700">Discover Students</p>
+                  </div>
+                </div>
+
+                {/* Continue Button */}
+                <Button
+                  onClick={() => {
+                    setShowWelcomeScreen(false)
+                    localStorage.setItem('hasSeenWelcome', 'true')
+                  }}
+                  className="w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-bold py-4 text-lg rounded-full shadow-lg hover:shadow-xl transition-all"
+                >
+                  Continue to App 🚀
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <Tabs defaultValue="discover" className="w-full overflow-x-hidden">
-          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-5 mb-8">
+          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8">
             <TabsTrigger value="discover">Discover</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
-            <TabsTrigger value="requests" className="relative">
-              Requests
-              {friendRequests.length > 0 && (
-                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
-                  {friendRequests.length}
-                </span>
-              )}
-            </TabsTrigger>
             <TabsTrigger value="matches">Friends</TabsTrigger>
             <TabsTrigger value="blocked" className="relative">
               Blocked
@@ -2363,8 +2651,9 @@ export default function App() {
                           setShowProfileModal(true)
                         }}
                       >
-                        <CardContent className="p-6">
-                          <div className="flex items-start gap-6">
+                        <CardContent className="p-4 md:p-6">
+                          {/* Desktop Layout - Side by side */}
+                          <div className="hidden md:flex items-start gap-6">
                             {/* Profile Photo */}
                             <div className="relative">
                               <Avatar className="h-24 w-24 border-4 border-purple-200 group-hover:border-purple-400 transition-all">
@@ -2410,11 +2699,11 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Action Buttons */}
+                            {/* Action Buttons - Desktop */}
                             <div className="flex flex-col gap-2">
                               <Button
                                 onClick={(e) => {
-                                  e.stopPropagation() // Prevent card click
+                                  e.stopPropagation()
                                   setSelectedProfile(profile)
                                   setShowProfileModal(true)
                                 }}
@@ -2427,8 +2716,8 @@ export default function App() {
                               {!likedProfiles.has(profile.id) && (
                                 <Button
                                   onClick={(e) => {
-                                    e.stopPropagation() // Prevent card click
-                                    handleLike(profile)
+                                    e.stopPropagation()
+                                    handleLike(profile.id)
                                   }}
                                   className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
                                 >
@@ -2444,6 +2733,87 @@ export default function App() {
                               )}
                             </div>
                           </div>
+
+                          {/* Mobile Layout - Stacked */}
+                          <div className="md:hidden space-y-4">
+                            {/* Profile Photo and Name */}
+                            <div className="flex items-start gap-4">
+                              <div className="relative">
+                                <Avatar className="h-16 w-16 border-4 border-purple-200">
+                                  <AvatarImage src={profile.photo_url} />
+                                  <AvatarFallback className="text-xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
+                                    {profile.name?.charAt(0) || 'U'}
+                                  </AvatarFallback>
+                                </Avatar>
+                              </div>
+                              <div className="flex-1">
+                                <h3 className="text-xl font-bold text-purple-900">{profile.name}</h3>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  {profile.department} • {profile.year} Year
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Email */}
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                              <Mail className="h-4 w-4 flex-shrink-0" />
+                              <span className="truncate">{profile.email}</span>
+                            </div>
+
+                            {/* Bio */}
+                            {profile.bio && (
+                              <p className="text-sm text-gray-700 leading-relaxed line-clamp-3">{profile.bio}</p>
+                            )}
+
+                            {/* Interests */}
+                            {profile.interests && profile.interests.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {profile.interests.slice(0, 4).map((interest, index) => (
+                                  <Badge key={index} variant="secondary" className="bg-purple-100 text-purple-700 text-xs">
+                                    {interest}
+                                  </Badge>
+                                ))}
+                                {profile.interests.length > 4 && (
+                                  <Badge variant="secondary" className="bg-gray-100 text-gray-600 text-xs">
+                                    +{profile.interests.length - 4}
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Action Buttons - Mobile (Full Width Below Profile) */}
+                            <div className="flex gap-2 pt-2 border-t">
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedProfile(profile)
+                                  setShowProfileModal(true)
+                                }}
+                                variant="outline"
+                                className="flex-1 border-2 border-purple-300 hover:bg-purple-50"
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View
+                              </Button>
+                              {!likedProfiles.has(profile.id) ? (
+                                <Button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleLike(profile.id)
+                                  }}
+                                  className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                                >
+                                  <Heart className="h-4 w-4 mr-2" />
+                                  Like
+                                </Button>
+                              ) : (
+                                <Button disabled variant="secondary" className="flex-1">
+                                  <Heart className="h-4 w-4 mr-2 fill-current" />
+                                  Liked
+                                </Button>
+                              )}
+                            </div>
+                          </div>
                         </CardContent>
                       </Card>
                     ))}
@@ -2453,152 +2823,342 @@ export default function App() {
             </div>
           </TabsContent>
 
-          {/* Friend Requests Tab */}
-          <TabsContent value="requests">
-            <div className="max-w-4xl mx-auto">
-              <div className="text-center mb-8">
-                <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 mb-2">
-                  Friend Requests
-                </h2>
-                <p className="text-gray-600">Incoming friend requests</p>
-              </div>
-
-              {friendRequests.length === 0 ? (
-                <Card className="p-12">
-                  <div className="text-center text-gray-500">
-                    <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-xl font-semibold">No pending requests</p>
-                    <p className="text-sm mt-2">You don't have any friend requests at the moment</p>
-                  </div>
-                </Card>
-              ) : (
-                <div className="space-y-4">
-                  {friendRequests.map((request) => (
-                    <Card 
-                      key={request.id} 
-                      className="hover:shadow-xl transition-all"
-                    >
-                      <CardContent className="p-6">
-                        <div className="flex items-center gap-6">
-                          {/* Profile Photo */}
-                          <Avatar className="h-20 w-20 border-4 border-purple-200">
-                            <AvatarImage src={request.sender?.photo_url} />
-                            <AvatarFallback className="text-2xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
-                              {request.sender?.name?.charAt(0) || 'U'}
-                            </AvatarFallback>
-                          </Avatar>
-
-                          {/* Profile Info */}
-                          <div className="flex-1">
-                            <h3 className="text-2xl font-bold mb-1 text-purple-900">
-                              {request.sender?.name}
-                            </h3>
-                            <div className="space-y-1 text-sm text-gray-600">
-                              <p className="flex items-center gap-2">
-                                <Mail className="h-4 w-4" />
-                                {request.sender?.email}
-                              </p>
-                              <p className="flex items-center gap-2">
-                                <User className="h-4 w-4" />
-                                {request.sender?.department} • {request.sender?.year} Year
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Action Buttons */}
-                          <div className="flex flex-col gap-2">
-                            <Button
-                              onClick={() => acceptFriendRequest(request)}
-                              className="bg-green-500 hover:bg-green-600 text-white"
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              Accept
-                            </Button>
-                            <Button
-                              onClick={() => rejectFriendRequest(request.id)}
-                              variant="outline"
-                              className="border-2 border-red-300 hover:bg-red-50 text-red-600"
-                            >
-                              <XCircle className="h-4 w-4 mr-2" />
-                              Reject
-                            </Button>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
           {/* Friends Tab */}
           <TabsContent value="matches">
             <div className="max-w-6xl mx-auto">
-              <h2 className="text-3xl font-bold text-center mb-8">Your Friends</h2>
-              {matches.length === 0 ? (
-                <Card className="p-12">
-                  <div className="text-center text-gray-500">
-                    <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-xl">No friends yet</p>
-                    <p className="text-sm mt-2">Start liking profiles to find your match!</p>
-                  </div>
-                </Card>
-              ) : (
-                <div className="grid lg:grid-cols-3 gap-6">
-                  {/* Friend List */}
-                  <div className="lg:col-span-1 space-y-4">
-                    {matches.map((match) => {
-                      const isOnline = onlineUsers.has(match.matchedUser?.id)
-                      const hasUnread = unreadMessages.has(match.id)
-                      return (
-                        <Card 
-                          key={match.id}
-                          className={`cursor-pointer hover:shadow-lg transition-all ${selectedMatch?.id === match.id ? 'ring-2 ring-purple-500' : ''}`}
-                          onClick={() => setSelectedMatch(match)}
-                        >
-                          <CardContent className="p-4">
-                            <div className="flex items-center gap-3">
-                              <div className="relative">
-                                <Avatar className="h-12 w-12">
-                                  <AvatarImage src={match.matchedUser?.photo_url} />
-                                  <AvatarFallback>{match.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
-                                </Avatar>
-                                {/* Online status indicator */}
-                                {isOnline && (
-                                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-                                )}
-                              </div>
-                              <div className="flex-1">
-                                <h3 className="font-semibold">{match.matchedUser?.name}</h3>
-                                <p className="text-xs text-gray-500">
-                                  {isOnline ? (
-                                    <span className="text-green-600 flex items-center gap-1">
-                                      <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
-                                      Online
-                                    </span>
-                                  ) : (
-                                    match.matchedUser?.department || 'Student'
-                                  )}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {/* Blue dot for unread messages */}
-                                {hasUnread && (
-                                  <span className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></span>
-                                )}
-                                <MessageCircle className="h-5 w-5 text-purple-500" />
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )
-                    })}
+              {/* Mobile Full-Page Chat View */}
+              {isMobileChatOpen && selectedMatch ? (
+                <div className="fixed inset-0 bg-white z-50 flex flex-col md:hidden">
+                  {/* Chat Header */}
+                  <div className="bg-gradient-to-r from-pink-500 to-purple-500 text-white p-4 shadow-lg">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setIsMobileChatOpen(false)
+                          setSelectedMatch(null)
+                        }}
+                        className="text-white hover:bg-white/20 p-2"
+                      >
+                        <X className="h-6 w-6" />
+                      </Button>
+                      <div className="relative">
+                        <Avatar className="h-10 w-10 border-2 border-white">
+                          <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                          <AvatarFallback>{selectedMatch.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
+                        </Avatar>
+                        {onlineUsers.has(selectedMatch.matchedUser?.id) && (
+                          <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></span>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-lg">{selectedMatch.matchedUser?.name}</h3>
+                        <p className="text-xs text-white/90">
+                          {onlineUsers.has(selectedMatch.matchedUser?.id) ? (
+                            <span className="flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse"></span>
+                              Active now
+                            </span>
+                          ) : (
+                            `${selectedMatch.matchedUser?.department} • ${selectedMatch.matchedUser?.year} Year`
+                          )}
+                        </p>
+                      </div>
+                      {/* Options Menu */}
+                      <div className="flex items-center gap-1">
+                        {!selectedMatch.isBlocked && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`Remove ${selectedMatch.matchedUser?.name} from friends?`)) {
+                                removeFriend(selectedMatch.matchedUser?.id)
+                                setIsMobileChatOpen(false)
+                              }
+                            }}
+                            className="text-white hover:bg-white/20 p-2"
+                            title="Remove Friend"
+                          >
+                            <UserMinus className="h-5 w-5" />
+                          </Button>
+                        )}
+                        
+                        {selectedMatch.isBlocked && selectedMatch.blockedBy === 'me' ? (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={async () => {
+                              if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
+                                try {
+                                  const response = await fetch('/api/unblock-user', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      blockerId: currentUser.id,
+                                      blockedId: selectedMatch.matchedUser?.id
+                                    })
+                                  })
+                                  if (response.ok) {
+                                    toast.success('User unblocked!')
+                                    setBlockedUsers(prev => {
+                                      const newSet = new Set(prev)
+                                      newSet.delete(selectedMatch.matchedUser?.id)
+                                      return newSet
+                                    })
+                                    loadMatches(currentUser.id)
+                                  } else {
+                                    toast.error('Failed to unblock')
+                                  }
+                                } catch (error) {
+                                  toast.error('Error unblocking')
+                                }
+                              }
+                            }}
+                            className="text-white hover:bg-white/20 p-2"
+                            title="Unblock"
+                          >
+                            <UserPlus className="h-5 w-5" />
+                          </Button>
+                        ) : !selectedMatch.isBlocked && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`Block ${selectedMatch.matchedUser?.name}?`)) {
+                                blockUser(selectedMatch.matchedUser?.id)
+                              }
+                            }}
+                            className="text-white hover:bg-white/20 p-2"
+                            title="Block"
+                          >
+                            <UserX className="h-5 w-5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Chat Area */}
-                  <div className="lg:col-span-2">
-                    {selectedMatch ? (
+                  {/* Chat Messages Area */}
+                  {selectedMatch.isBlocked ? (
+                    <div className="flex-1 flex items-center justify-center p-6 bg-gray-50">
+                      <div className="text-center max-w-sm">
+                        <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
+                        <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                          Can't Chat
+                        </h3>
+                        <p className="text-gray-600">
+                          {selectedMatch.blockedBy === 'them' ? (
+                            <>This user has blocked you.</>
+                          ) : (
+                            <>You have blocked this user.</>
+                          )}
+                        </p>
+                        {selectedMatch.blockedBy === 'me' && (
+                          <Button
+                            onClick={async () => {
+                              if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
+                                try {
+                                  const response = await fetch('/api/unblock-user', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      blockerId: currentUser.id,
+                                      blockedId: selectedMatch.matchedUser?.id
+                                    })
+                                  })
+                                  if (response.ok) {
+                                    toast.success('Unblocked!')
+                                    setBlockedUsers(prev => {
+                                      const newSet = new Set(prev)
+                                      newSet.delete(selectedMatch.matchedUser?.id)
+                                      return newSet
+                                    })
+                                    loadMatches(currentUser.id)
+                                  }
+                                } catch (error) {
+                                  toast.error('Error')
+                                }
+                              }
+                            }}
+                            className="mt-4 bg-purple-500 hover:bg-purple-600"
+                          >
+                            Unblock User
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div id="mobile-chat-messages" className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                        <div className="space-y-4">
+                          {messages.length === 0 ? (
+                            <div className="text-center text-gray-500 py-12">
+                              <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                              <p className="text-lg">No messages yet</p>
+                              <p className="text-sm mt-1">Say hi! 👋</p>
+                            </div>
+                          ) : (
+                            messages.map((msg, index) => {
+                              const isCurrentUser = msg.senderId === currentUser.id
+                              const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId
+                              
+                              return (
+                                <div 
+                                  key={msg.id}
+                                  className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                                >
+                                  <div className={`flex items-end gap-2 max-w-[85%] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                                    {showAvatar && !isCurrentUser && (
+                                      <Avatar className="h-8 w-8 flex-shrink-0">
+                                        <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                                        <AvatarFallback className="text-xs">
+                                          {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    )}
+                                    {showAvatar && isCurrentUser && (
+                                      <Avatar className="h-8 w-8 flex-shrink-0">
+                                        <AvatarImage src={currentUser?.photo_url} />
+                                        <AvatarFallback className="text-xs">
+                                          {currentUser?.name?.charAt(0) || 'U'}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    )}
+                                    {!showAvatar && <div className="w-8 flex-shrink-0"></div>}
+                                    
+                                    <div 
+                                      className={`rounded-2xl px-4 py-2.5 ${
+                                        isCurrentUser 
+                                          ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white' 
+                                          : 'bg-white text-gray-900 shadow-sm'
+                                      }`}
+                                    >
+                                      <p className="break-words text-sm leading-relaxed">{msg.message}</p>
+                                      <p className={`text-xs mt-1 ${
+                                        isCurrentUser ? 'text-pink-100' : 'text-gray-400'
+                                      }`}>
+                                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })
+                          )}
+                          {isTyping && (
+                            <div className="flex justify-start">
+                              <div className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                                <div className="flex gap-1">
+                                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
+                                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Message Input */}
+                      <div className="border-t bg-white p-4 shadow-lg">
+                        <form onSubmit={handleSendMessage} className="flex gap-2">
+                          <Input
+                            type="text"
+                            placeholder="Type a message..."
+                            value={messageInput}
+                            onChange={(e) => {
+                              setMessageInput(e.target.value)
+                              handleTyping()
+                            }}
+                            className="flex-1 rounded-full border-2 border-gray-200 focus:border-purple-400 px-4"
+                          />
+                          <Button 
+                            type="submit"
+                            disabled={!messageInput.trim()}
+                            className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 rounded-full h-11 w-11 p-0"
+                          >
+                            <Send className="h-5 w-5" />
+                          </Button>
+                        </form>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-3xl font-bold text-center mb-8">Your Friends</h2>
+                  {matches.length === 0 ? (
+                    <Card className="p-12">
+                      <div className="text-center text-gray-500">
+                        <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                        <p className="text-xl">No friends yet</p>
+                        <p className="text-sm mt-2">Start liking profiles to find your match!</p>
+                      </div>
+                    </Card>
+                  ) : (
+                    <div className="grid lg:grid-cols-3 gap-6">
+                      {/* Friend List */}
+                      <div className="lg:col-span-1 space-y-4">
+                        {matches.map((match) => {
+                          const isOnline = onlineUsers.has(match.matchedUser?.id)
+                          const hasUnread = unreadMessages.has(match.id)
+                          return (
+                            <Card 
+                              key={match.id}
+                              className={`cursor-pointer hover:shadow-lg transition-all ${selectedMatch?.id === match.id ? 'ring-2 ring-purple-500' : ''}`}
+                              onClick={() => {
+                                // Check if mobile view
+                                if (window.innerWidth < 1024) {
+                                  setSelectedMatch(match)
+                                  setIsMobileChatOpen(true)
+                                } else {
+                                  setSelectedMatch(match)
+                                }
+                              }}
+                            >
+                              <CardContent className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="relative">
+                                    <Avatar className="h-12 w-12">
+                                      <AvatarImage src={match.matchedUser?.photo_url} />
+                                      <AvatarFallback>{match.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
+                                    </Avatar>
+                                    {/* Online status indicator */}
+                                    {isOnline && (
+                                      <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+                                    )}
+                                  </div>
+                                  <div className="flex-1">
+                                    <h3 className="font-semibold">{match.matchedUser?.name}</h3>
+                                    <p className="text-xs text-gray-500">
+                                      {isOnline ? (
+                                        <span className="text-green-600 flex items-center gap-1">
+                                          <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
+                                          Online
+                                        </span>
+                                      ) : (
+                                        match.matchedUser?.department || 'Student'
+                                      )}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {/* Blue dot for unread messages */}
+                                    {hasUnread && (
+                                      <span className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></span>
+                                    )}
+                                    <MessageCircle className="h-5 w-5 text-purple-500" />
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
+                      </div>
+
+                      {/* Chat Area - Desktop Only */}
+                      <div className="hidden lg:block lg:col-span-2">
+                        {selectedMatch ? (
                       <Card className="h-[600px] flex flex-col">
                         <CardHeader className="border-b">
                           <div className="flex items-center justify-between">
@@ -2875,8 +3435,10 @@ export default function App() {
                         </div>
                       </Card>
                     )}
-                  </div>
-                </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </TabsContent>
@@ -3085,7 +3647,7 @@ export default function App() {
                   ) : (
                     <Button 
                       onClick={async () => {
-                        await handleLike(selectedProfile)
+                        await sendFriendRequest(selectedProfile.id)
                         closeProfileView()
                       }}
                       className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-base py-6"
