@@ -642,6 +642,8 @@ export default function App() {
           newSet.delete(blockedId)
           return newSet
         })
+        // Reload blocked users list to update the Blocked tab
+        loadBlockedUsers(currentUser.id)
         // Reload matches to show blocked status
         loadMatches(currentUser.id)
         // Don't close the chat - let them see the blocked message
@@ -2942,6 +2944,7 @@ export default function App() {
                                       newSet.delete(selectedMatch.matchedUser?.id)
                                       return newSet
                                     })
+                                    setBlockedUsersList(prev => prev.filter(u => u.id !== selectedMatch.matchedUser?.id))
                                     loadMatches(currentUser.id)
                                   } else {
                                     toast.error('Failed to unblock')
@@ -3010,6 +3013,7 @@ export default function App() {
                                       newSet.delete(selectedMatch.matchedUser?.id)
                                       return newSet
                                     })
+                                    setBlockedUsersList(prev => prev.filter(u => u.id !== selectedMatch.matchedUser?.id))
                                     loadMatches(currentUser.id)
                                   }
                                 } catch (error) {
