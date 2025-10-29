@@ -1903,9 +1903,9 @@ export default function App() {
                   title="Notifications"
                 >
                   <Bell className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
-                  {(unreadWarningsCount > 0 || friendRequests.length > 0) && (
+                  {(unreadWarningsCount > 0 || friendRequests.length > 0 || unreadMessages.size > 0) && (
                     <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
-                      {unreadWarningsCount + friendRequests.length}
+                      {unreadWarningsCount + friendRequests.length + unreadMessages.size}
                     </span>
                   )}
                 </button>
@@ -2280,7 +2280,14 @@ export default function App() {
           <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8">
             <TabsTrigger value="discover">Discover</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
-            <TabsTrigger value="matches">Friends</TabsTrigger>
+            <TabsTrigger value="matches" className="relative">
+              Friends
+              {unreadMessages.size > 0 && (
+                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                  {unreadMessages.size}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="blocked" className="relative">
               Blocked
               {blockedUsers.size > 0 && (

@@ -1234,9 +1234,28 @@ async function handleGetPendingRequests(request) {
 
     console.log('📋 Found', requests?.length || 0, 'friend requests')
 
+    // Get all existing matches for this user to filter out
+    const { data: existingMatches } = await supabase
+      .from('matches')
+      .select('user1Id, user2Id')
+      .or(`user1Id.eq.${userId},user2Id.eq.${userId}`)
+
+    const matchedUserIds = new Set(
+      (existingMatches || []).map(match => 
+        match.user1Id === userId ? match.user2Id : match.user1Id
+      )
+    )
+
+    console.log('🤝 User already matched with', matchedUserIds.size, 'people')
+
+    // Filter out requests from users who are already matched
+    const pendingRequests = (requests || []).filter(req => !matchedUserIds.has(req.sender_id))
+
+    console.log('📋 After filtering, showing', pendingRequests.length, 'pending requests')
+
     // Get full sender profiles for each request
     const requestsWithProfiles = await Promise.all(
-      (requests || []).map(async (req) => {
+      pendingRequests.map(async (req) => {
         const { data: senderProfile, error: profileError } = await supabase
           .from('profiles')
           .select('id, name, bio, department, year, interests, photo_url, email')
