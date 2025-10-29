@@ -1904,7 +1904,7 @@ export default function App() {
                 >
                   <Bell className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
                   {(unreadWarningsCount > 0 || friendRequests.length > 0) && (
-                    <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                    <span className="absolute -top-1 -right-1 h-5 w-5 md:h-6 md:w-6 bg-red-500 text-white text-xs md:text-sm font-bold rounded-full flex items-center justify-center animate-pulse z-10">
                       {unreadWarningsCount + friendRequests.length}
                     </span>
                   )}
@@ -2283,7 +2283,7 @@ export default function App() {
             <TabsTrigger value="matches" className="relative">
               Friends
               {unreadMessages.size > 0 && (
-                <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1 -right-1 h-5 w-5 md:h-6 md:w-6 bg-red-500 text-white text-xs md:text-sm font-bold rounded-full flex items-center justify-center animate-pulse z-10">
                   {unreadMessages.size}
                 </span>
               )}
@@ -2291,7 +2291,7 @@ export default function App() {
             <TabsTrigger value="blocked" className="relative">
               Blocked
               {blockedUsers.size > 0 && (
-                <span className="absolute -top-1 -right-1 h-5 w-5 bg-gray-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 h-5 w-5 md:h-6 md:w-6 bg-gray-500 text-white text-xs md:text-sm font-bold rounded-full flex items-center justify-center z-10">
                   {blockedUsers.size}
                 </span>
               )}
