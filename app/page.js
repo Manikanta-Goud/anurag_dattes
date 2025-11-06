@@ -115,6 +115,13 @@ export default function App() {
           // New message arrives - add it instantly!
           const newMessage = payload.new
           
+          // CRITICAL: Only add message if it belongs to the CURRENT selected match
+          // This prevents messages from jumping between chats
+          if (newMessage.matchId !== selectedMatch.id) {
+            console.log('⚠️ Message belongs to different match, ignoring:', newMessage.matchId)
+            return
+          }
+          
           setMessages(prev => {
             // Avoid duplicates
             if (prev.some(msg => msg.id === newMessage.id)) {
@@ -531,6 +538,13 @@ export default function App() {
       const data = await response.json()
       if (response.ok) {
         const newMessages = data.messages || []
+        
+        // CRITICAL: Only update messages if this is still the selected match
+        // This prevents race conditions when switching chats quickly
+        if (selectedMatch && selectedMatch.id !== matchId) {
+          console.log('⚠️ Ignoring loadMessages for old match:', matchId)
+          return
+        }
         
         // Check if there are actually new messages
         const hasNewMessages = newMessages.length !== messages.length
@@ -3332,6 +3346,9 @@ export default function App() {
                               key={match.id}
                               className={`cursor-pointer hover:shadow-lg transition-all ${selectedMatch?.id === match.id ? 'ring-2 ring-purple-500' : ''}`}
                               onClick={() => {
+                                // Clear messages before switching to prevent cross-chat contamination
+                                setMessages([])
+                                
                                 // Check if mobile view
                                 if (window.innerWidth < 1024) {
                                   setSelectedMatch(match)
