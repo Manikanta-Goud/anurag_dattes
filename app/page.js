@@ -100,14 +100,73 @@ export default function App() {
       setShouldAutoScroll(true) // Enable auto-scroll when opening a chat
       loadMessages(selectedMatch.id, true) // Force scroll on initial load
       
-      // Poll for new messages every 1 second for real-time chat
-      const interval = setInterval(() => {
-        loadMessages(selectedMatch.id, false) // Don't force scroll on polling
-      }, 1000)
+      // Subscribe to real-time message updates using Supabase Realtime
+      console.log('🔌 Subscribing to Realtime for match:', selectedMatch.id)
       
-      return () => clearInterval(interval)
+      const channel = supabase
+        .channel(`match-${selectedMatch.id}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `matchId=eq.${selectedMatch.id}`
+        }, (payload) => {
+          console.log('⚡ REALTIME MESSAGE RECEIVED:', payload.new)
+          // New message arrives - add it instantly!
+          const newMessage = payload.new
+          
+          setMessages(prev => {
+            // Avoid duplicates
+            if (prev.some(msg => msg.id === newMessage.id)) {
+              return prev
+            }
+            return [...prev, newMessage]
+          })
+          
+          // Update match's last message time for sorting
+          setMatches(prevMatches => {
+            return prevMatches.map(match => {
+              if (match.id === selectedMatch.id) {
+                return { ...match, lastMessageTime: newMessage.createdAt }
+              }
+              return match
+            })
+          })
+          
+          // Auto-scroll if at bottom
+          if (shouldAutoScroll) {
+            setTimeout(() => {
+              const chatContainer = document.getElementById('chat-messages')
+              const mobileChatContainer = document.getElementById('mobile-chat-messages')
+              if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight
+              if (mobileChatContainer) mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
+            }, 50)
+          }
+        })
+        .subscribe((status) => {
+          console.log('📡 Realtime subscription status:', status)
+          
+          if (status === 'SUBSCRIPTION_ERROR') {
+            console.error('❌ Realtime subscription failed! Check Supabase Dashboard → Database → Replication')
+            toast.error('Realtime not enabled. Messages will have 2-3 sec delay.')
+          } else if (status === 'SUBSCRIBED') {
+            console.log('✅ Realtime connected! Messages will be instant.')
+          }
+        })
+      
+      // Fallback polling if Realtime doesn't work (safety net)
+      const pollInterval = setInterval(() => {
+        console.log('🔄 Fallback polling (Realtime should handle this)')
+        loadMessages(selectedMatch.id, false)
+      }, 3000) // Poll every 3 seconds as backup
+      
+      return () => {
+        console.log('🔌 Unsubscribing from Realtime')
+        supabase.removeChannel(channel)
+        clearInterval(pollInterval)
+      }
     }
-  }, [selectedMatch])
+  }, [selectedMatch, shouldAutoScroll])
 
   // Add scroll listeners to detect when user is scrolling
   useEffect(() => {
@@ -3263,8 +3322,8 @@ export default function App() {
                     </Card>
                   ) : (
                     <div className="grid lg:grid-cols-3 gap-6">
-                      {/* Friend List */}
-                      <div className="lg:col-span-1 space-y-4">
+                      {/* Friend List - Scrollable Container */}
+                      <div className="lg:col-span-1 space-y-4 lg:h-[600px] lg:overflow-y-auto lg:pr-2 scroll-smooth">
                         {matches.map((match) => {
                           const isOnline = onlineUsers.has(match.matchedUser?.id)
                           const hasUnread = unreadMessages.has(match.id)
