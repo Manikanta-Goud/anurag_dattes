@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,6 +21,9 @@ export default function App() {
   const [matches, setMatches] = useState([])
   const [selectedMatch, setSelectedMatch] = useState(null)
   const [messages, setMessages] = useState([])
+  
+  // Use ref to track current match ID - prevents stale closure in callbacks
+  const currentMatchIdRef = useRef(null)
   const [messageInput, setMessageInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false) // Track if mobile chat page is open
@@ -97,34 +100,52 @@ export default function App() {
 
   useEffect(() => {
     if (selectedMatch) {
+      // CRITICAL: Remove ALL existing channels first to prevent stale subscriptions
+      console.log('🧹 Cleaning up all existing Realtime channels')
+      supabase.getChannels().forEach(channel => {
+        console.log('🗑️ Removing old channel:', channel.topic)
+        supabase.removeChannel(channel)
+      })
+      
+      // Update the ref with current match ID
+      currentMatchIdRef.current = selectedMatch.id
+      console.log('✅ Current match ID set to:', selectedMatch.id)
+      
       setShouldAutoScroll(true) // Enable auto-scroll when opening a chat
       loadMessages(selectedMatch.id, true) // Force scroll on initial load
       
       // Subscribe to real-time message updates using Supabase Realtime
       console.log('🔌 Subscribing to Realtime for match:', selectedMatch.id)
       
+      const matchId = selectedMatch.id // Capture in closure
+      
       const channel = supabase
-        .channel(`match-${selectedMatch.id}`)
+        .channel(`match-${matchId}`)
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-          filter: `matchId=eq.${selectedMatch.id}`
+          filter: `matchId=eq.${matchId}`
         }, (payload) => {
           console.log('⚡ REALTIME MESSAGE RECEIVED:', payload.new)
+          console.log('📌 Current match ID ref:', currentMatchIdRef.current)
+          console.log('📌 Message match ID:', payload.new.matchId)
+          
           // New message arrives - add it instantly!
           const newMessage = payload.new
           
           // CRITICAL: Only add message if it belongs to the CURRENT selected match
-          // This prevents messages from jumping between chats
-          if (newMessage.matchId !== selectedMatch.id) {
-            console.log('⚠️ Message belongs to different match, ignoring:', newMessage.matchId)
+          // Use ref instead of closure to get the LATEST match ID
+          if (newMessage.matchId !== currentMatchIdRef.current) {
+            console.log('⚠️ Message belongs to different match, IGNORING. Expected:', currentMatchIdRef.current, 'Got:', newMessage.matchId)
             return
           }
           
+          console.log('✅ Message validated, adding to chat')
           setMessages(prev => {
             // Avoid duplicates
             if (prev.some(msg => msg.id === newMessage.id)) {
+              console.log('⚠️ Duplicate message detected, skipping')
               return prev
             }
             return [...prev, newMessage]
@@ -163,15 +184,28 @@ export default function App() {
       
       // Fallback polling if Realtime doesn't work (safety net)
       const pollInterval = setInterval(() => {
-        console.log('🔄 Fallback polling (Realtime should handle this)')
-        loadMessages(selectedMatch.id, false)
+        // Use the captured matchId, not selectedMatch (which might be stale)
+        if (currentMatchIdRef.current === matchId) {
+          console.log('🔄 Fallback polling for match:', matchId)
+          loadMessages(matchId, false)
+        } else {
+          console.log('⚠️ Skipping fallback poll - match changed')
+        }
       }, 3000) // Poll every 3 seconds as backup
       
       return () => {
-        console.log('🔌 Unsubscribing from Realtime')
+        console.log('🔌 Unsubscribing from Realtime for match:', matchId)
         supabase.removeChannel(channel)
         clearInterval(pollInterval)
+        
+        // Clear ref if this was the current match
+        if (currentMatchIdRef.current === matchId) {
+          currentMatchIdRef.current = null
+        }
       }
+    } else {
+      // No match selected - clear the ref
+      currentMatchIdRef.current = null
     }
   }, [selectedMatch, shouldAutoScroll])
 
