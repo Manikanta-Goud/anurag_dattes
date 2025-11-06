@@ -58,6 +58,10 @@ export default function App() {
   const [blockedUsers, setBlockedUsers] = useState(new Set())
   const [blockedUsersList, setBlockedUsersList] = useState([]) // Full profile data
 
+  // Scroll tracking state
+  const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true) // Control auto-scroll behavior
+
   // Auth form state
   const [authForm, setAuthForm] = useState({
     email: '',
@@ -93,26 +97,46 @@ export default function App() {
 
   useEffect(() => {
     if (selectedMatch) {
-      loadMessages(selectedMatch.id)
+      setShouldAutoScroll(true) // Enable auto-scroll when opening a chat
+      loadMessages(selectedMatch.id, true) // Force scroll on initial load
+      
       // Poll for new messages every 1 second for real-time chat
       const interval = setInterval(() => {
-        loadMessages(selectedMatch.id)
+        loadMessages(selectedMatch.id, false) // Don't force scroll on polling
       }, 1000)
+      
       return () => clearInterval(interval)
     }
   }, [selectedMatch])
 
-  // Auto-scroll for mobile chat
+  // Add scroll listeners to detect when user is scrolling
   useEffect(() => {
-    if (isMobileChatOpen && messages.length > 0) {
-      setTimeout(() => {
-        const mobileChatContainer = document.getElementById('mobile-chat-messages')
-        if (mobileChatContainer) {
-          mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
-        }
-      }, 100)
+    const handleScroll = (e) => {
+      const container = e.target
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+      setIsUserAtBottom(isAtBottom)
+      setShouldAutoScroll(isAtBottom)
     }
-  }, [messages, isMobileChatOpen])
+
+    const chatContainer = document.getElementById('chat-messages')
+    const mobileChatContainer = document.getElementById('mobile-chat-messages')
+
+    if (chatContainer) {
+      chatContainer.addEventListener('scroll', handleScroll)
+    }
+    if (mobileChatContainer) {
+      mobileChatContainer.addEventListener('scroll', handleScroll)
+    }
+
+    return () => {
+      if (chatContainer) {
+        chatContainer.removeEventListener('scroll', handleScroll)
+      }
+      if (mobileChatContainer) {
+        mobileChatContainer.removeEventListener('scroll', handleScroll)
+      }
+    }
+  }, [selectedMatch, isMobileChatOpen])
 
   useEffect(() => {
     // Check for unread messages from all friends
@@ -442,12 +466,17 @@ export default function App() {
     }
   }
 
-  const loadMessages = async (matchId) => {
+  const loadMessages = async (matchId, forceScroll = false) => {
     try {
       const response = await fetch(`/api/messages?matchId=${matchId}`)
       const data = await response.json()
       if (response.ok) {
-        setMessages(data.messages || [])
+        const newMessages = data.messages || []
+        
+        // Check if there are actually new messages
+        const hasNewMessages = newMessages.length !== messages.length
+        
+        setMessages(newMessages)
         
         // Mark this friend as read (remove from unread set)
         setUnreadMessages(prev => {
@@ -459,17 +488,84 @@ export default function App() {
         // Save timestamp of when we last read messages from this friend
         localStorage.setItem(`lastRead_${matchId}`, new Date().toISOString())
         
-        // Auto scroll to bottom
+        // Re-sort matches to move this conversation to the top
+        sortMatchesByLastMessage()
+        
+        // Smart auto-scroll: Only scroll if user is at bottom OR if force scroll OR if new message arrives
         setTimeout(() => {
           const chatContainer = document.getElementById('chat-messages')
-          if (chatContainer) {
-            chatContainer.scrollTop = chatContainer.scrollHeight
+          const mobileChatContainer = document.getElementById('mobile-chat-messages')
+          
+          if (chatContainer && (forceScroll || shouldAutoScroll || hasNewMessages)) {
+            // Check if user is already near bottom (within 100px)
+            const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100
+            
+            if (forceScroll || isNearBottom) {
+              chatContainer.scrollTop = chatContainer.scrollHeight
+            }
           }
-        }, 100)
+          
+          if (mobileChatContainer && (forceScroll || shouldAutoScroll || hasNewMessages)) {
+            const isNearBottom = mobileChatContainer.scrollHeight - mobileChatContainer.scrollTop - mobileChatContainer.clientHeight < 100
+            
+            if (forceScroll || isNearBottom) {
+              mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
+            }
+          }
+        }, 50)
       }
     } catch (error) {
       console.error('Failed to load messages:', error)
     }
+  }
+
+  // Helper function to sort matches by most recent message
+  const sortMatchesByLastMessage = () => {
+    setMatches(prevMatches => {
+      const sorted = [...prevMatches].sort((a, b) => {
+        const timeA = new Date(a.lastMessageTime || a.createdAt).getTime()
+        const timeB = new Date(b.lastMessageTime || b.createdAt).getTime()
+        return timeB - timeA // Most recent first
+      })
+      return sorted
+    })
+  }
+
+  // Helper function to format date as "Today", "Yesterday", or actual date
+  const formatMessageDate = (dateString) => {
+    const messageDate = new Date(dateString)
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    // Reset hours for accurate date comparison
+    const messageDateOnly = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate())
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    const yesterdayDateOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate())
+
+    if (messageDateOnly.getTime() === todayDateOnly.getTime()) {
+      return 'Today'
+    } else if (messageDateOnly.getTime() === yesterdayDateOnly.getTime()) {
+      return 'Yesterday'
+    } else {
+      // Format as "Nov 5, 2025" or "5 Nov 2025"
+      const options = { month: 'short', day: 'numeric', year: 'numeric' }
+      return messageDate.toLocaleDateString('en-US', options)
+    }
+  }
+
+  // Helper function to check if we should show a date separator
+  const shouldShowDateSeparator = (currentMessage, previousMessage) => {
+    if (!previousMessage) return true // Always show for first message
+
+    const currentDate = new Date(currentMessage.createdAt)
+    const previousDate = new Date(previousMessage.createdAt)
+
+    // Compare dates (ignoring time)
+    const currentDateOnly = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate())
+    const previousDateOnly = new Date(previousDate.getFullYear(), previousDate.getMonth(), previousDate.getDate())
+
+    return currentDateOnly.getTime() !== previousDateOnly.getTime()
   }
 
   const updateOnlineStatus = async () => {
@@ -807,7 +903,19 @@ export default function App() {
       })
 
       if (response.ok) {
-        loadMessages(selectedMatch.id)
+        // Update the lastMessageTime for this match to move it to the top
+        setMatches(prevMatches => {
+          return prevMatches.map(match => {
+            if (match.id === selectedMatch.id) {
+              return { ...match, lastMessageTime: new Date().toISOString() }
+            }
+            return match
+          })
+        })
+        
+        // Force scroll to bottom when user sends a message
+        setShouldAutoScroll(true)
+        loadMessages(selectedMatch.id, true)
       } else {
         toast.error('Failed to send message')
         setMessageInput(tempMessage)
@@ -3037,7 +3145,7 @@ export default function App() {
                     </div>
                   ) : (
                     <>
-                      <div id="mobile-chat-messages" className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                      <div id="mobile-chat-messages" className="flex-1 overflow-y-auto p-4 bg-gray-50 scroll-smooth">
                         <div className="space-y-4">
                           {messages.length === 0 ? (
                             <div className="text-center text-gray-500 py-12">
@@ -3049,30 +3157,39 @@ export default function App() {
                             messages.map((msg, index) => {
                               const isCurrentUser = msg.senderId === currentUser.id
                               const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId
+                              const showDateSeparator = shouldShowDateSeparator(msg, messages[index - 1])
                               
                               return (
-                                <div 
-                                  key={msg.id}
-                                  className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                                >
-                                  <div className={`flex items-end gap-2 max-w-[85%] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                                    {showAvatar && !isCurrentUser && (
-                                      <Avatar className="h-8 w-8 flex-shrink-0">
-                                        <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
-                                        <AvatarFallback className="text-xs">
-                                          {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
-                                        </AvatarFallback>
-                                      </Avatar>
-                                    )}
-                                    {showAvatar && isCurrentUser && (
-                                      <Avatar className="h-8 w-8 flex-shrink-0">
-                                        <AvatarImage src={currentUser?.photo_url} />
-                                        <AvatarFallback className="text-xs">
-                                          {currentUser?.name?.charAt(0) || 'U'}
-                                        </AvatarFallback>
-                                      </Avatar>
-                                    )}
-                                    {!showAvatar && <div className="w-8 flex-shrink-0"></div>}
+                                <div key={msg.id}>
+                                  {/* Date Separator */}
+                                  {showDateSeparator && (
+                                    <div className="flex items-center justify-center my-4">
+                                      <div className="bg-white shadow-sm text-gray-600 text-xs font-medium px-4 py-1.5 rounded-full border border-gray-200">
+                                        {formatMessageDate(msg.createdAt)}
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Message */}
+                                  <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`flex items-end gap-2 max-w-[85%] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                                      {showAvatar && !isCurrentUser && (
+                                        <Avatar className="h-8 w-8 flex-shrink-0">
+                                          <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                                          <AvatarFallback className="text-xs">
+                                            {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
+                                          </AvatarFallback>
+                                        </Avatar>
+                                      )}
+                                      {showAvatar && isCurrentUser && (
+                                        <Avatar className="h-8 w-8 flex-shrink-0">
+                                          <AvatarImage src={currentUser?.photo_url} />
+                                          <AvatarFallback className="text-xs">
+                                            {currentUser?.name?.charAt(0) || 'U'}
+                                          </AvatarFallback>
+                                        </Avatar>
+                                      )}
+                                      {!showAvatar && <div className="w-8 flex-shrink-0"></div>}
                                     
                                     <div 
                                       className={`rounded-2xl px-4 py-2.5 ${
@@ -3087,6 +3204,7 @@ export default function App() {
                                       }`}>
                                         {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                       </p>
+                                    </div>
                                     </div>
                                   </div>
                                 </div>
@@ -3381,7 +3499,7 @@ export default function App() {
                           </CardContent>
                         ) : (
                           <>
-                            <CardContent id="chat-messages" className="flex-1 overflow-y-auto p-4">
+                            <CardContent id="chat-messages" className="flex-1 overflow-y-auto p-4 scroll-smooth">
                           <div className="space-y-4">
                             {messages.length === 0 ? (
                               <div className="text-center text-gray-500 py-12">
@@ -3392,30 +3510,39 @@ export default function App() {
                               messages.map((msg, index) => {
                                 const isCurrentUser = msg.senderId === currentUser.id
                                 const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId
+                                const showDateSeparator = shouldShowDateSeparator(msg, messages[index - 1])
                                 
                                 return (
-                                  <div 
-                                    key={msg.id}
-                                    className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-                                  >
-                                    <div className={`flex items-end gap-2 ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                                      {showAvatar && !isCurrentUser && (
-                                        <Avatar className="h-8 w-8">
-                                          <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
-                                          <AvatarFallback className="text-xs">
-                                            {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                      )}
-                                      {showAvatar && isCurrentUser && (
-                                        <Avatar className="h-8 w-8">
-                                          <AvatarImage src={currentUser?.photo_url} />
-                                          <AvatarFallback className="text-xs">
-                                            {currentUser?.name?.charAt(0) || 'U'}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                      )}
-                                      {!showAvatar && <div className="w-8"></div>}
+                                  <div key={msg.id}>
+                                    {/* Date Separator */}
+                                    {showDateSeparator && (
+                                      <div className="flex items-center justify-center my-4">
+                                        <div className="bg-gray-200 text-gray-600 text-xs font-medium px-3 py-1 rounded-full">
+                                          {formatMessageDate(msg.createdAt)}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Message */}
+                                    <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                                      <div className={`flex items-end gap-2 ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                                        {showAvatar && !isCurrentUser && (
+                                          <Avatar className="h-8 w-8">
+                                            <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                                            <AvatarFallback className="text-xs">
+                                              {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
+                                            </AvatarFallback>
+                                          </Avatar>
+                                        )}
+                                        {showAvatar && isCurrentUser && (
+                                          <Avatar className="h-8 w-8">
+                                            <AvatarImage src={currentUser?.photo_url} />
+                                            <AvatarFallback className="text-xs">
+                                              {currentUser?.name?.charAt(0) || 'U'}
+                                            </AvatarFallback>
+                                          </Avatar>
+                                        )}
+                                        {!showAvatar && <div className="w-8"></div>}
                                       
                                       <div 
                                         className={`max-w-[70%] rounded-2xl px-4 py-2 ${
@@ -3431,6 +3558,7 @@ export default function App() {
                                           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                       </div>
+                                    </div>
                                     </div>
                                   </div>
                                 )

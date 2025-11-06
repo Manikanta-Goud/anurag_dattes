@@ -434,7 +434,7 @@ async function handleGetMatches(request) {
       ...(blockedMe || []).map(b => b.blocker_id)
     ])
 
-    // Get profile details for matched users
+    // Get profile details for matched users and last message timestamp
     const matchesWithProfiles = await Promise.all(
       (matches || []).map(async (match) => {
         const matchedUserId = match.user1Id === userId ? match.user2Id : match.user1Id
@@ -450,14 +450,31 @@ async function handleGetMatches(request) {
           .eq('id', matchedUserId)
           .single()
 
+        // Get the most recent message for this match to use for sorting
+        const { data: lastMessage } = await supabase
+          .from('messages')
+          .select('createdAt')
+          .eq('matchId', match.id)
+          .order('createdAt', { ascending: false })
+          .limit(1)
+          .single()
+
         return {
           ...match,
           matchedUser,
           isBlocked,
-          blockedBy
+          blockedBy,
+          lastMessageTime: lastMessage?.createdAt || match.createdAt // Use match creation time if no messages yet
         }
       })
     )
+
+    // Sort matches by last message time (most recent first)
+    matchesWithProfiles.sort((a, b) => {
+      const timeA = new Date(a.lastMessageTime).getTime()
+      const timeB = new Date(b.lastMessageTime).getTime()
+      return timeB - timeA // Descending order (newest first)
+    })
 
     return NextResponse.json({ matches: matchesWithProfiles })
   } catch (error) {
