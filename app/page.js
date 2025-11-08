@@ -799,6 +799,8 @@ export default function App() {
       const data = await response.json()
       if (response.ok) {
         const blockedIds = data.map(b => b.blocked_id)
+        
+        // Always update both states - clear if empty
         setBlockedUsers(new Set(blockedIds))
         
         // Fetch full profile data for blocked users
@@ -808,13 +810,20 @@ export default function App() {
           if (profilesResponse.ok) {
             const blockedProfiles = profilesData.profiles.filter(p => blockedIds.includes(p.id))
             setBlockedUsersList(blockedProfiles)
+            console.log('✅ Loaded blocked users:', blockedProfiles.length)
           }
         } else {
+          // Clear both when no blocked users
           setBlockedUsersList([])
+          setBlockedUsers(new Set())
+          console.log('✅ No blocked users')
         }
       }
     } catch (error) {
       console.error('Failed to load blocked users:', error)
+      // Clear on error
+      setBlockedUsersList([])
+      setBlockedUsers(new Set())
     }
   }
 
@@ -1447,7 +1456,16 @@ export default function App() {
                 Anurag Connect
               </h1>
               <p className="text-2xl text-gray-600 mb-2">Find Your Campus Match</p>
-              <p className="text-lg text-gray-500">Exclusive dating platform for Anurag University students</p>
+              <p className="text-lg text-gray-500 mb-8">Exclusive dating platform for Anurag University students</p>
+              
+              {/* Get Started Button - Immediately visible without scrolling */}
+              <Button 
+                onClick={() => setView('auth')} 
+                size="lg" 
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-12 py-6 text-xl rounded-full shadow-lg hover:shadow-xl transition-all"
+              >
+                Get Started →
+              </Button>
             </div>
 
             {/* College Photos */}
@@ -1504,16 +1522,6 @@ export default function App() {
                   <p className="text-center text-gray-600">Start conversations with your matches instantly</p>
                 </CardContent>
               </Card>
-            </div>
-
-            <div className="flex justify-center">
-              <Button 
-                onClick={() => setView('auth')} 
-                size="lg" 
-                className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white px-12 py-6 text-xl rounded-full shadow-lg"
-              >
-                Get Started
-              </Button>
             </div>
           </div>
         </div>
@@ -2586,9 +2594,9 @@ export default function App() {
             </TabsTrigger>
             <TabsTrigger value="blocked" className="relative">
               Blocked
-              {blockedUsers.size > 0 && (
+              {blockedUsersList.length > 0 && (
                 <span className="absolute -top-1 -right-1 h-5 w-5 md:h-6 md:w-6 bg-gray-500 text-white text-xs md:text-sm font-bold rounded-full flex items-center justify-center z-10">
-                  {blockedUsers.size}
+                  {blockedUsersList.length}
                 </span>
               )}
             </TabsTrigger>
