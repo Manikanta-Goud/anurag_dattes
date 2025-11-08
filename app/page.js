@@ -1056,7 +1056,7 @@ export default function App() {
             body: JSON.stringify({ profileId })
           })
           const likeData = await likeResponse.json()
-          console.log('Like increment response:', likeData)
+          console.log('✅ Like increment response:', likeData)
           
           // Show warning if columns don't exist
           if (likeData.columnsExist === false) {
@@ -1065,12 +1065,17 @@ export default function App() {
             toast.error('⚠️ Leaderboard not set up yet! Check console.')
           }
           
-          // Refresh leaderboard if user is viewing it
-          if (activeTab === 'leaderboard' || leaderboardData.length > 0) {
+          if (likeData.success) {
+            console.log('✅ Like count incremented successfully!')
+          }
+          
+          // Always refresh leaderboard data if it was loaded before
+          if (leaderboardData.length > 0) {
+            console.log('🔄 Refreshing leaderboard after like...')
             setTimeout(() => loadLeaderboard(leaderboardType), 500)
           }
         } catch (err) {
-          console.error('Failed to increment like:', err)
+          console.error('❌ Failed to increment like:', err)
         }
 
         if (data.matched) {

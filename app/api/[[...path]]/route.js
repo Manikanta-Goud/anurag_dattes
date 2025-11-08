@@ -1638,14 +1638,18 @@ async function handleIncrementLike(request) {
 
     console.log('Current likes:', profile)
 
+    const newCounts = {
+      total_likes: (profile.total_likes || 0) + 1,
+      daily_likes: (profile.daily_likes || 0) + 1,
+      weekly_likes: (profile.weekly_likes || 0) + 1
+    }
+
+    console.log('Updating to:', newCounts)
+
     // Update with incremented values
     const { error: updateError } = await supabase
       .from('profiles')
-      .update({
-        total_likes: (profile.total_likes || 0) + 1,
-        daily_likes: (profile.daily_likes || 0) + 1,
-        weekly_likes: (profile.weekly_likes || 0) + 1
-      })
+      .update(newCounts)
       .eq('id', profileId)
 
     if (updateError) {
@@ -1656,7 +1660,7 @@ async function handleIncrementLike(request) {
       )
     }
 
-    console.log('✅ Like count updated successfully')
+    console.log('✅ Like count updated successfully:', newCounts)
 
     return NextResponse.json({
       success: true,
