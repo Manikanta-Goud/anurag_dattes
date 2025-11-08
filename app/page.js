@@ -402,8 +402,8 @@ export default function App() {
           if (status === 'SUBSCRIBED') {
             console.log('✅ Listening for new friend requests!')
           } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Failed to subscribe to friend requests')
-            toast.error('Real-time notifications disabled. Please refresh.')
+            console.error('❌ Realtime connection error, will retry...')
+            // Don't show error toast - connection will auto-reconnect
           }
         })
       
