@@ -1609,80 +1609,54 @@ async function handleIncrementLike(request) {
 
     console.log('Incrementing like for profile:', profileId)
 
-    // Try using the database function first
-    const { data: rpcData, error: rpcError } = await supabase.rpc('increment_like_count', {
-      profile_id: profileId
-    })
+    // Get current values
+    const { data: profile, error: fetchError } = await supabase
+      .from('profiles')
+      .select('total_likes, daily_likes, weekly_likes')
+      .eq('id', profileId)
+      .single()
 
-    if (rpcError) {
-      console.log('RPC error, using fallback:', rpcError.message)
+    if (fetchError) {
+      console.error('Error fetching profile:', fetchError)
       
-      // Check if it's a column error (columns don't exist)
-      if (rpcError.message.includes('column') || rpcError.message.includes('does not exist')) {
-        console.error('❌ LEADERBOARD COLUMNS DO NOT EXIST IN DATABASE!')
-        console.error('Please run the SQL migration: add-leaderboard-columns.sql')
+      if (fetchError.message.includes('column')) {
         return NextResponse.json(
           { 
             error: 'Leaderboard columns not found',
-            message: 'Please run SQL migration: add-leaderboard-columns.sql in Supabase',
+            message: 'Columns do not exist',
             columnsExist: false
           },
           { status: 500 }
         )
       }
 
-      // Fallback: manual update
-      const { data: updateData, error: updateError } = await supabase
-        .from('profiles')
-        .select('id, total_likes, daily_likes, weekly_likes')
-        .eq('id', profileId)
-        .single()
-
-      if (updateError) {
-        // Columns definitely don't exist
-        if (updateError.message.includes('column')) {
-          console.error('❌ LEADERBOARD COLUMNS DO NOT EXIST IN DATABASE!')
-          return NextResponse.json(
-            { 
-              error: 'Leaderboard columns not found',
-              message: 'Please run SQL migration in Supabase Dashboard',
-              columnsExist: false
-            },
-            { status: 500 }
-          )
-        }
-
-        console.error('Error fetching profile:', updateError)
-        return NextResponse.json(
-          { error: 'Profile not found', details: updateError.message },
-          { status: 404 }
-        )
-      }
-
-      console.log('Current likes:', updateData)
-
-      // Update with incremented values
-      const { error: finalError } = await supabase
-        .from('profiles')
-        .update({
-          total_likes: (updateData.total_likes || 0) + 1,
-          daily_likes: (updateData.daily_likes || 0) + 1,
-          weekly_likes: (updateData.weekly_likes || 0) + 1
-        })
-        .eq('id', profileId)
-
-      if (finalError) {
-        console.error('Error updating likes:', finalError)
-        return NextResponse.json(
-          { error: 'Failed to update likes', details: finalError.message },
-          { status: 500 }
-        )
-      }
-
-      console.log('✅ Like count updated via fallback')
-    } else {
-      console.log('✅ Like count updated via RPC function')
+      return NextResponse.json(
+        { error: 'Profile not found', details: fetchError.message },
+        { status: 404 }
+      )
     }
+
+    console.log('Current likes:', profile)
+
+    // Update with incremented values
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({
+        total_likes: (profile.total_likes || 0) + 1,
+        daily_likes: (profile.daily_likes || 0) + 1,
+        weekly_likes: (profile.weekly_likes || 0) + 1
+      })
+      .eq('id', profileId)
+
+    if (updateError) {
+      console.error('Error updating likes:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to update likes', details: updateError.message },
+        { status: 500 }
+      )
+    }
+
+    console.log('✅ Like count updated successfully')
 
     return NextResponse.json({
       success: true,
