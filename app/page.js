@@ -2994,44 +2994,48 @@ export default function App() {
 
           {/* Leaderboard Tab */}
           <TabsContent value="leaderboard">
-            <div className="max-w-4xl mx-auto px-4">
-              <div className="text-center mb-6">
-                <h2 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 mb-2">
+            <div className="max-w-4xl mx-auto px-2 md:px-4">
+              <div className="text-center mb-4 md:mb-6">
+                <h2 className="text-3xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 mb-2">
                   🏆 Leaderboard
                 </h2>
-                <p className="text-gray-600">Most liked profiles on Anurag Connect</p>
+                <p className="text-sm md:text-base text-gray-600">Most liked profiles on Anurag Connect</p>
               </div>
 
               {/* Time Period Selector */}
-              <div className="flex justify-center items-center gap-4 mb-8 flex-wrap">
+              <div className="flex justify-center items-center gap-2 md:gap-4 mb-6 md:mb-8 flex-wrap px-2">
                 <Button
                   onClick={() => loadLeaderboard('daily')}
                   variant={leaderboardType === 'daily' ? 'default' : 'outline'}
-                  className={leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500' : ''}
+                  className={`text-xs md:text-sm ${leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500' : ''}`}
+                  size="sm"
                 >
                   🔥 Today
                 </Button>
                 <Button
                   onClick={() => loadLeaderboard('weekly')}
                   variant={leaderboardType === 'weekly' ? 'default' : 'outline'}
-                  className={leaderboardType === 'weekly' ? 'bg-gradient-to-r from-yellow-500 to-orange-500' : ''}
+                  className={`text-xs md:text-sm ${leaderboardType === 'weekly' ? 'bg-gradient-to-r from-yellow-500 to-orange-500' : ''}`}
+                  size="sm"
                 >
-                  ⭐ This Week
+                  ⭐ Week
                 </Button>
                 <Button
                   onClick={() => loadLeaderboard('alltime')}
                   variant={leaderboardType === 'alltime' ? 'default' : 'outline'}
-                  className={leaderboardType === 'alltime' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : ''}
+                  className={`text-xs md:text-sm ${leaderboardType === 'alltime' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : ''}`}
+                  size="sm"
                 >
                   👑 All Time
                 </Button>
                 <Button
                   onClick={() => loadLeaderboard(leaderboardType)}
                   variant="outline"
-                  className="ml-4"
+                  className="text-xs md:text-sm"
+                  size="sm"
                   disabled={loadingLeaderboard}
                 >
-                  {loadingLeaderboard ? '🔄' : '🔄 Refresh'}
+                  {loadingLeaderboard ? '🔄' : '🔄'}
                 </Button>
               </div>
 
@@ -3061,69 +3065,69 @@ export default function App() {
                       <Card
                         key={profile.id}
                         className={`hover:shadow-xl transition-all ${
-                          rank === 1 ? 'border-4 border-yellow-400 shadow-yellow-200 shadow-lg' :
-                          rank === 2 ? 'border-3 border-gray-300' :
-                          rank === 3 ? 'border-3 border-orange-300' : ''
+                          rank === 1 ? 'border-2 md:border-4 border-yellow-400 shadow-yellow-200 shadow-lg' :
+                          rank === 2 ? 'border-2 md:border-3 border-gray-300' :
+                          rank === 3 ? 'border-2 md:border-3 border-orange-300' : ''
                         }`}
                       >
-                        <CardContent className="p-6">
-                          <div className="flex items-center gap-6">
+                        <CardContent className="p-3 md:p-6">
+                          <div className="flex items-center gap-2 md:gap-6">
                             {/* Rank Badge */}
                             <div className={`flex-shrink-0 ${
-                              rank === 1 ? 'text-6xl' : rank === 2 ? 'text-5xl' : rank === 3 ? 'text-4xl' : 'text-3xl'
+                              rank === 1 ? 'text-3xl md:text-6xl' : rank === 2 ? 'text-2xl md:text-5xl' : rank === 3 ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'
                             }`}>
                               {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
                             </div>
 
                             {/* Profile Photo */}
                             <Avatar className={`${
-                              rank === 1 ? 'h-24 w-24 border-4 border-yellow-400' :
-                              rank === 2 ? 'h-20 w-20 border-3 border-gray-400' :
-                              rank === 3 ? 'h-20 w-20 border-3 border-orange-400' :
-                              'h-16 w-16 border-2 border-gray-200'
+                              rank === 1 ? 'h-14 w-14 md:h-24 md:w-24 border-2 md:border-4 border-yellow-400' :
+                              rank === 2 ? 'h-12 w-12 md:h-20 md:w-20 border-2 md:border-3 border-gray-400' :
+                              rank === 3 ? 'h-12 w-12 md:h-20 md:w-20 border-2 md:border-3 border-orange-400' :
+                              'h-10 w-10 md:h-16 md:w-16 border-2 border-gray-200'
                             }`}>
                               <AvatarImage src={profile.photo_url} />
-                              <AvatarFallback className="text-2xl bg-gradient-to-br from-pink-400 to-purple-600 text-white">
+                              <AvatarFallback className="text-sm md:text-2xl bg-gradient-to-br from-pink-400 to-purple-600 text-white">
                                 {profile.name?.charAt(0) || 'U'}
                               </AvatarFallback>
                             </Avatar>
 
                             {/* Profile Info */}
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1 md:gap-2 mb-1 flex-wrap">
                                 <h3 className={`font-bold ${
-                                  rank === 1 ? 'text-2xl' : rank === 2 || rank === 3 ? 'text-xl' : 'text-lg'
-                                } text-gray-900`}>
+                                  rank === 1 ? 'text-base md:text-2xl' : rank === 2 || rank === 3 ? 'text-sm md:text-xl' : 'text-sm md:text-lg'
+                                } text-gray-900 truncate`}>
                                   {profile.name}
                                 </h3>
                                 {badge && (
-                                  <Badge className={`${badge.color} bg-opacity-20`}>
+                                  <Badge className={`${badge.color} bg-opacity-20 text-xs hidden md:inline-flex`}>
                                     {badge.emoji} {badge.text}
                                   </Badge>
                                 )}
                               </div>
-                              <div className="space-y-1 text-sm text-gray-600">
-                                <p>{profile.department} • {profile.year} Year</p>
+                              <div className="space-y-0.5 text-xs md:text-sm text-gray-600">
+                                <p className="truncate">{profile.department} • {profile.year} Year</p>
                                 {profile.bio && (
-                                  <p className="text-gray-500 italic line-clamp-1">{profile.bio}</p>
+                                  <p className="text-gray-500 italic line-clamp-1 hidden md:block">{profile.bio}</p>
                                 )}
                               </div>
                             </div>
 
                             {/* Stats */}
-                            <div className="text-right">
+                            <div className="text-right flex-shrink-0">
                               <div className={`${
-                                rank === 1 ? 'text-3xl' : rank === 2 || rank === 3 ? 'text-2xl' : 'text-xl'
-                              } font-bold text-pink-500 mb-1`}>
+                                rank === 1 ? 'text-xl md:text-3xl' : rank === 2 || rank === 3 ? 'text-lg md:text-2xl' : 'text-base md:text-xl'
+                              } font-bold text-pink-500 mb-0.5 md:mb-1`}>
                                 ❤️ {likesCount}
                               </div>
-                              <p className="text-xs text-gray-500">
+                              <p className="text-[10px] md:text-xs text-gray-500 hidden md:block">
                                 {leaderboardType === 'daily' ? 'likes today' :
                                  leaderboardType === 'weekly' ? 'likes this week' :
                                  'total likes'}
                               </p>
                               {profile.profile_views > 0 && (
-                                <p className="text-xs text-gray-400 mt-1">
+                                <p className="text-[10px] md:text-xs text-gray-400 mt-0.5 md:mt-1 hidden md:block">
                                   👁️ {profile.profile_views} views
                                 </p>
                               )}
@@ -3132,7 +3136,8 @@ export default function App() {
                             {/* View Profile Button */}
                             <Button
                               onClick={() => setSelectedProfile(profile)}
-                              className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                              className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-xs md:text-sm px-2 md:px-4 py-1 md:py-2 h-auto"
+                              size="sm"
                             >
                               View
                             </Button>
