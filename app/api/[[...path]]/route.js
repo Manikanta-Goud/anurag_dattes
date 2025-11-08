@@ -1504,19 +1504,42 @@ async function handleGetLeaderboard(request) {
     if (type === 'weekly') orderColumn = 'weekly_likes'
     if (type === 'alltime') orderColumn = 'total_likes'
 
-    const { data, error } = await supabase
+    // First try to get profiles with like columns
+    let { data, error } = await supabase
       .from('profiles')
       .select('*')
       .order(orderColumn, { ascending: false })
       .limit(limit)
 
-    if (error) throw error
+    // If columns don't exist, fetch all profiles and add default values
+    if (error && error.message.includes('column')) {
+      console.log('Like columns do not exist yet, returning profiles with default values')
+      const { data: allProfiles, error: fallbackError } = await supabase
+        .from('profiles')
+        .select('*')
+        .limit(limit)
+
+      if (fallbackError) throw fallbackError
+
+      // Add default like columns
+      data = allProfiles.map(profile => ({
+        ...profile,
+        total_likes: 0,
+        daily_likes: 0,
+        weekly_likes: 0,
+        profile_views: 0
+      }))
+    } else if (error) {
+      throw error
+    }
 
     return NextResponse.json({
       leaderboard: data || [],
-      type
+      type,
+      columnsExist: !error || !error.message.includes('column')
     })
   } catch (error) {
+    console.error('Leaderboard error:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
@@ -1566,6 +1589,108 @@ async function handleIncrementView(request) {
       success: true
     })
   } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleIncrementLike(request) {
+  try {
+    const { profileId } = await request.json()
+
+    if (!profileId) {
+      return NextResponse.json(
+        { error: 'Profile ID is required' },
+        { status: 400 }
+      )
+    }
+
+    console.log('Incrementing like for profile:', profileId)
+
+    // Try using the database function first
+    const { data: rpcData, error: rpcError } = await supabase.rpc('increment_like_count', {
+      profile_id: profileId
+    })
+
+    if (rpcError) {
+      console.log('RPC error, using fallback:', rpcError.message)
+      
+      // Check if it's a column error (columns don't exist)
+      if (rpcError.message.includes('column') || rpcError.message.includes('does not exist')) {
+        console.error('❌ LEADERBOARD COLUMNS DO NOT EXIST IN DATABASE!')
+        console.error('Please run the SQL migration: add-leaderboard-columns.sql')
+        return NextResponse.json(
+          { 
+            error: 'Leaderboard columns not found',
+            message: 'Please run SQL migration: add-leaderboard-columns.sql in Supabase',
+            columnsExist: false
+          },
+          { status: 500 }
+        )
+      }
+
+      // Fallback: manual update
+      const { data: updateData, error: updateError } = await supabase
+        .from('profiles')
+        .select('id, total_likes, daily_likes, weekly_likes')
+        .eq('id', profileId)
+        .single()
+
+      if (updateError) {
+        // Columns definitely don't exist
+        if (updateError.message.includes('column')) {
+          console.error('❌ LEADERBOARD COLUMNS DO NOT EXIST IN DATABASE!')
+          return NextResponse.json(
+            { 
+              error: 'Leaderboard columns not found',
+              message: 'Please run SQL migration in Supabase Dashboard',
+              columnsExist: false
+            },
+            { status: 500 }
+          )
+        }
+
+        console.error('Error fetching profile:', updateError)
+        return NextResponse.json(
+          { error: 'Profile not found', details: updateError.message },
+          { status: 404 }
+        )
+      }
+
+      console.log('Current likes:', updateData)
+
+      // Update with incremented values
+      const { error: finalError } = await supabase
+        .from('profiles')
+        .update({
+          total_likes: (updateData.total_likes || 0) + 1,
+          daily_likes: (updateData.daily_likes || 0) + 1,
+          weekly_likes: (updateData.weekly_likes || 0) + 1
+        })
+        .eq('id', profileId)
+
+      if (finalError) {
+        console.error('Error updating likes:', finalError)
+        return NextResponse.json(
+          { error: 'Failed to update likes', details: finalError.message },
+          { status: 500 }
+        )
+      }
+
+      console.log('✅ Like count updated via fallback')
+    } else {
+      console.log('✅ Like count updated via RPC function')
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Like count incremented',
+      columnsExist: true
+    })
+  } catch (error) {
+    console.error('handleIncrementLike error:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
@@ -1687,6 +1812,8 @@ export async function POST(request) {
     return handleUnblockUser(request)
   } else if (pathname.includes('/api/remove-friend')) {
     return handleRemoveFriend(request)
+  } else if (pathname.includes('/api/increment-like')) {
+    return handleIncrementLike(request)
   } else if (pathname.includes('/api/increment-view')) {
     return handleIncrementView(request)
   }

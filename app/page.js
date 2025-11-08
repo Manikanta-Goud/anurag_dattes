@@ -65,6 +65,7 @@ export default function App() {
   const [leaderboardData, setLeaderboardData] = useState([])
   const [leaderboardType, setLeaderboardType] = useState('daily') // daily, weekly, alltime
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
+  const [activeTab, setActiveTab] = useState('discover')
 
   // Scroll tracking state
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
@@ -446,6 +447,20 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [view, currentProfileIndex, profiles])
+
+  // Auto-refresh leaderboard every 10 seconds when viewing it
+  useEffect(() => {
+    let intervalId
+    if (activeTab === 'leaderboard') {
+      intervalId = setInterval(() => {
+        loadLeaderboard(leaderboardType)
+      }, 10000) // Refresh every 10 seconds
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, [activeTab, leaderboardType])
 
   const handleAuth = async (e) => {
     e.preventDefault()
@@ -1047,6 +1062,31 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
+        // Increment like count for leaderboard
+        try {
+          const likeResponse = await fetch('/api/increment-like', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profileId })
+          })
+          const likeData = await likeResponse.json()
+          console.log('Like increment response:', likeData)
+          
+          // Show warning if columns don't exist
+          if (likeData.columnsExist === false) {
+            console.error('⚠️ LEADERBOARD NOT SET UP!')
+            console.error('Run this SQL in Supabase: add-leaderboard-columns.sql')
+            toast.error('⚠️ Leaderboard not set up yet! Check console.')
+          }
+          
+          // Refresh leaderboard if user is viewing it
+          if (activeTab === 'leaderboard' || leaderboardData.length > 0) {
+            setTimeout(() => loadLeaderboard(leaderboardType), 500)
+          }
+        } catch (err) {
+          console.error('Failed to increment like:', err)
+        }
+
         if (data.matched) {
           toast.success('🎉 It\'s a match!')
           loadMatches(currentUser.id)
@@ -2618,10 +2658,12 @@ export default function App() {
 
         <Tabs 
           defaultValue="discover" 
+          value={activeTab}
           className="w-full overflow-x-hidden"
           onValueChange={(value) => {
-            if (value === 'leaderboard' && leaderboardData.length === 0) {
-              loadLeaderboard('daily')
+            setActiveTab(value)
+            if (value === 'leaderboard') {
+              loadLeaderboard(leaderboardType)
             }
           }}
         >
@@ -2953,7 +2995,7 @@ export default function App() {
           {/* Leaderboard Tab */}
           <TabsContent value="leaderboard">
             <div className="max-w-4xl mx-auto px-4">
-              <div className="text-center mb-8">
+              <div className="text-center mb-6">
                 <h2 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 mb-2">
                   🏆 Leaderboard
                 </h2>
@@ -2961,7 +3003,7 @@ export default function App() {
               </div>
 
               {/* Time Period Selector */}
-              <div className="flex justify-center gap-4 mb-8">
+              <div className="flex justify-center items-center gap-4 mb-8 flex-wrap">
                 <Button
                   onClick={() => loadLeaderboard('daily')}
                   variant={leaderboardType === 'daily' ? 'default' : 'outline'}
@@ -2982,6 +3024,14 @@ export default function App() {
                   className={leaderboardType === 'alltime' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : ''}
                 >
                   👑 All Time
+                </Button>
+                <Button
+                  onClick={() => loadLeaderboard(leaderboardType)}
+                  variant="outline"
+                  className="ml-4"
+                  disabled={loadingLeaderboard}
+                >
+                  {loadingLeaderboard ? '🔄' : '🔄 Refresh'}
                 </Button>
               </div>
 
