@@ -448,20 +448,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [view, currentProfileIndex, profiles])
 
-  // Auto-refresh leaderboard every 10 seconds when viewing it
-  useEffect(() => {
-    let intervalId
-    if (activeTab === 'leaderboard') {
-      intervalId = setInterval(() => {
-        loadLeaderboard(leaderboardType)
-      }, 10000) // Refresh every 10 seconds
-    }
-
-    return () => {
-      if (intervalId) clearInterval(intervalId)
-    }
-  }, [activeTab, leaderboardType])
-
   const handleAuth = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -3141,7 +3127,7 @@ export default function App() {
                                   </div>
 
                                   <Button
-                                    onClick={() => setSelectedProfile(profile)}
+                                    onClick={() => openProfileView(profile)}
                                     className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-xs px-3 py-1.5 h-auto"
                                   >
                                     View
@@ -3171,7 +3157,7 @@ export default function App() {
 
                             {/* View Profile Button - Right Side on Desktop Only */}
                             <Button
-                              onClick={() => setSelectedProfile(profile)}
+                              onClick={() => openProfileView(profile)}
                               className="hidden md:block bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-sm px-4 py-2 h-auto flex-shrink-0"
                             >
                               View
