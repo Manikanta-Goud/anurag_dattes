@@ -61,6 +61,11 @@ export default function App() {
   const [blockedUsers, setBlockedUsers] = useState(new Set())
   const [blockedUsersList, setBlockedUsersList] = useState([]) // Full profile data
 
+  // Leaderboard state
+  const [leaderboardData, setLeaderboardData] = useState([])
+  const [leaderboardType, setLeaderboardType] = useState('daily') // daily, weekly, alltime
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
+
   // Scroll tracking state
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true) // Control auto-scroll behavior
@@ -825,6 +830,37 @@ export default function App() {
       setBlockedUsersList([])
       setBlockedUsers(new Set())
     }
+  }
+
+  const loadLeaderboard = async (type = 'daily') => {
+    try {
+      setLoadingLeaderboard(true)
+      const response = await fetch(`/api/leaderboard?type=${type}&limit=20`)
+      const data = await response.json()
+      
+      if (response.ok) {
+        setLeaderboardData(data.leaderboard || [])
+        setLeaderboardType(type)
+        console.log(`✅ Loaded ${type} leaderboard:`, data.leaderboard.length)
+      }
+    } catch (error) {
+      console.error('Failed to load leaderboard:', error)
+      setLeaderboardData([])
+    } finally {
+      setLoadingLeaderboard(false)
+    }
+  }
+
+  const getBadge = (profile, rank) => {
+    const dailyRank = leaderboardType === 'daily' && rank <= 3
+    const weeklyRank = leaderboardType === 'weekly' && rank <= 10
+    const alltimeRank = leaderboardType === 'alltime' && rank <= 3
+
+    if (dailyRank && rank === 1) return { emoji: '🔥', text: 'Hottest Today', color: 'text-orange-500' }
+    if (dailyRank && rank <= 3) return { emoji: '🔥', text: 'Hot Today', color: 'text-orange-400' }
+    if (weeklyRank) return { emoji: '⭐', text: 'Rising Star', color: 'text-yellow-500' }
+    if (alltimeRank) return { emoji: '👑', text: 'Most Popular', color: 'text-purple-500' }
+    return null
   }
 
   const sendFriendRequest = async (receiverId) => {
@@ -2580,9 +2616,18 @@ export default function App() {
           </div>
         )}
 
-        <Tabs defaultValue="discover" className="w-full overflow-x-hidden">
-          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8">
+        <Tabs 
+          defaultValue="discover" 
+          className="w-full overflow-x-hidden"
+          onValueChange={(value) => {
+            if (value === 'leaderboard' && leaderboardData.length === 0) {
+              loadLeaderboard('daily')
+            }
+          }}
+        >
+          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-5 mb-8">
             <TabsTrigger value="discover">Discover</TabsTrigger>
+            <TabsTrigger value="leaderboard">🏆 Top</TabsTrigger>
             <TabsTrigger value="search">Search</TabsTrigger>
             <TabsTrigger value="matches" className="relative">
               Friends
@@ -2903,6 +2948,162 @@ export default function App() {
                 </div>
               </div>
             )}
+          </TabsContent>
+
+          {/* Leaderboard Tab */}
+          <TabsContent value="leaderboard">
+            <div className="max-w-4xl mx-auto px-4">
+              <div className="text-center mb-8">
+                <h2 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 mb-2">
+                  🏆 Leaderboard
+                </h2>
+                <p className="text-gray-600">Most liked profiles on Anurag Connect</p>
+              </div>
+
+              {/* Time Period Selector */}
+              <div className="flex justify-center gap-4 mb-8">
+                <Button
+                  onClick={() => loadLeaderboard('daily')}
+                  variant={leaderboardType === 'daily' ? 'default' : 'outline'}
+                  className={leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500' : ''}
+                >
+                  🔥 Today
+                </Button>
+                <Button
+                  onClick={() => loadLeaderboard('weekly')}
+                  variant={leaderboardType === 'weekly' ? 'default' : 'outline'}
+                  className={leaderboardType === 'weekly' ? 'bg-gradient-to-r from-yellow-500 to-orange-500' : ''}
+                >
+                  ⭐ This Week
+                </Button>
+                <Button
+                  onClick={() => loadLeaderboard('alltime')}
+                  variant={leaderboardType === 'alltime' ? 'default' : 'outline'}
+                  className={leaderboardType === 'alltime' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : ''}
+                >
+                  👑 All Time
+                </Button>
+              </div>
+
+              {loadingLeaderboard ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
+                  <p className="text-gray-500 mt-4">Loading leaderboard...</p>
+                </div>
+              ) : leaderboardData.length === 0 ? (
+                <Card className="p-12">
+                  <div className="text-center text-gray-500">
+                    <Users className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-xl font-semibold">No data yet</p>
+                    <p className="text-sm mt-2">Be the first to get on the leaderboard!</p>
+                  </div>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  {leaderboardData.map((profile, index) => {
+                    const rank = index + 1
+                    const badge = getBadge(profile, rank)
+                    const likesCount = leaderboardType === 'daily' ? profile.daily_likes :
+                                     leaderboardType === 'weekly' ? profile.weekly_likes :
+                                     profile.total_likes
+
+                    return (
+                      <Card
+                        key={profile.id}
+                        className={`hover:shadow-xl transition-all ${
+                          rank === 1 ? 'border-4 border-yellow-400 shadow-yellow-200 shadow-lg' :
+                          rank === 2 ? 'border-3 border-gray-300' :
+                          rank === 3 ? 'border-3 border-orange-300' : ''
+                        }`}
+                      >
+                        <CardContent className="p-6">
+                          <div className="flex items-center gap-6">
+                            {/* Rank Badge */}
+                            <div className={`flex-shrink-0 ${
+                              rank === 1 ? 'text-6xl' : rank === 2 ? 'text-5xl' : rank === 3 ? 'text-4xl' : 'text-3xl'
+                            }`}>
+                              {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
+                            </div>
+
+                            {/* Profile Photo */}
+                            <Avatar className={`${
+                              rank === 1 ? 'h-24 w-24 border-4 border-yellow-400' :
+                              rank === 2 ? 'h-20 w-20 border-3 border-gray-400' :
+                              rank === 3 ? 'h-20 w-20 border-3 border-orange-400' :
+                              'h-16 w-16 border-2 border-gray-200'
+                            }`}>
+                              <AvatarImage src={profile.photo_url} />
+                              <AvatarFallback className="text-2xl bg-gradient-to-br from-pink-400 to-purple-600 text-white">
+                                {profile.name?.charAt(0) || 'U'}
+                              </AvatarFallback>
+                            </Avatar>
+
+                            {/* Profile Info */}
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className={`font-bold ${
+                                  rank === 1 ? 'text-2xl' : rank === 2 || rank === 3 ? 'text-xl' : 'text-lg'
+                                } text-gray-900`}>
+                                  {profile.name}
+                                </h3>
+                                {badge && (
+                                  <Badge className={`${badge.color} bg-opacity-20`}>
+                                    {badge.emoji} {badge.text}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="space-y-1 text-sm text-gray-600">
+                                <p>{profile.department} • {profile.year} Year</p>
+                                {profile.bio && (
+                                  <p className="text-gray-500 italic line-clamp-1">{profile.bio}</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Stats */}
+                            <div className="text-right">
+                              <div className={`${
+                                rank === 1 ? 'text-3xl' : rank === 2 || rank === 3 ? 'text-2xl' : 'text-xl'
+                              } font-bold text-pink-500 mb-1`}>
+                                ❤️ {likesCount}
+                              </div>
+                              <p className="text-xs text-gray-500">
+                                {leaderboardType === 'daily' ? 'likes today' :
+                                 leaderboardType === 'weekly' ? 'likes this week' :
+                                 'total likes'}
+                              </p>
+                              {profile.profile_views > 0 && (
+                                <p className="text-xs text-gray-400 mt-1">
+                                  👁️ {profile.profile_views} views
+                                </p>
+                              )}
+                            </div>
+
+                            {/* View Profile Button */}
+                            <Button
+                              onClick={() => setSelectedProfile(profile)}
+                              className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                            >
+                              View
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Motivational Message */}
+              <div className="mt-12 text-center p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl">
+                <p className="text-lg font-semibold text-gray-700 mb-2">
+                  Want to be on the leaderboard? 🚀
+                </p>
+                <p className="text-sm text-gray-600">
+                  Complete your profile, add a great photo, write an interesting bio, and be active!
+                </p>
+              </div>
+            </div>
           </TabsContent>
 
           {/* Search Tab */}

@@ -1493,6 +1493,86 @@ async function handleGetBlockedUsers(request) {
   }
 }
 
+// Leaderboard handlers
+async function handleGetLeaderboard(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const type = searchParams.get('type') || 'daily' // daily, weekly, alltime
+    const limit = parseInt(searchParams.get('limit') || '20')
+
+    let orderColumn = 'daily_likes'
+    if (type === 'weekly') orderColumn = 'weekly_likes'
+    if (type === 'alltime') orderColumn = 'total_likes'
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order(orderColumn, { ascending: false })
+      .limit(limit)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      leaderboard: data || [],
+      type
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleGetTrending(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const limit = parseInt(searchParams.get('limit') || '10')
+
+    // Get profiles with most likes today
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('daily_likes', { ascending: false })
+      .limit(limit)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      trending: data || []
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleIncrementView(request) {
+  try {
+    const { profileId } = await request.json()
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ 
+        profile_views: supabase.raw('profile_views + 1')
+      })
+      .eq('id', profileId)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 async function handleRemoveFriend(request) {
   try {
     const { userId1, userId2 } = await request.json()
@@ -1559,6 +1639,10 @@ export async function GET(request) {
     return handleGetPendingRequests(request)
   } else if (pathname.includes('/api/blocked-users')) {
     return handleGetBlockedUsers(request)
+  } else if (pathname.includes('/api/leaderboard')) {
+    return handleGetLeaderboard(request)
+  } else if (pathname.includes('/api/trending')) {
+    return handleGetTrending(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -1603,6 +1687,8 @@ export async function POST(request) {
     return handleUnblockUser(request)
   } else if (pathname.includes('/api/remove-friend')) {
     return handleRemoveFriend(request)
+  } else if (pathname.includes('/api/increment-view')) {
+    return handleIncrementView(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
