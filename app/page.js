@@ -327,6 +327,87 @@ export default function App() {
     }
   }
 
+  // Real-time friend requests subscription
+  useEffect(() => {
+    if (currentUser && view === 'main') {
+      // Initial load of friend requests
+      loadFriendRequests(currentUser.id)
+      
+      // Subscribe to new friend requests in real-time
+      console.log('🔔 Subscribing to real-time friend requests for user:', currentUser.id)
+      
+      const channel = supabase
+        .channel(`friend-requests-${currentUser.id}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'friend_requests',
+          filter: `receiver_id=eq.${currentUser.id}`
+        }, async (payload) => {
+          console.log('⚡ NEW FRIEND REQUEST RECEIVED:', payload.new)
+          
+          // Fetch the sender's profile data
+          try {
+            const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
+            const data = await response.json()
+            
+            if (response.ok && data.profiles) {
+              const senderProfile = data.profiles.find(p => p.id === payload.new.sender_id)
+              
+              if (senderProfile) {
+                const newRequest = {
+                  id: payload.new.id,
+                  sender_id: payload.new.sender_id,
+                  receiver_id: payload.new.receiver_id,
+                  status: payload.new.status,
+                  requestedAt: payload.new.created_at,
+                  ...senderProfile
+                }
+                
+                // Add to friend requests list instantly
+                setFriendRequests(prev => {
+                  // Avoid duplicates
+                  if (prev.some(req => req.id === newRequest.id)) {
+                    return prev
+                  }
+                  return [newRequest, ...prev]
+                })
+                
+                // Show notification toast
+                toast.success(`${senderProfile.name} sent you a friend request! 🎉`, {
+                  duration: 5000,
+                  action: {
+                    label: 'View',
+                    onClick: () => setShowNotifications(true)
+                  }
+                })
+                
+                console.log('✅ Friend request added to notifications:', newRequest)
+              }
+            }
+          } catch (error) {
+            console.error('Failed to fetch sender profile:', error)
+            // Fallback: reload all friend requests
+            loadFriendRequests(currentUser.id)
+          }
+        })
+        .subscribe((status) => {
+          console.log('📡 Friend requests Realtime status:', status)
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Listening for new friend requests!')
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Failed to subscribe to friend requests')
+            toast.error('Real-time notifications disabled. Please refresh.')
+          }
+        })
+      
+      return () => {
+        console.log('🔌 Unsubscribing from friend requests')
+        supabase.removeChannel(channel)
+      }
+    }
+  }, [currentUser, view])
+
   useEffect(() => {
     // Update online status every 30 seconds
     if (currentUser && view === 'main') {
