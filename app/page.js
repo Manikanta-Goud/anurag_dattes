@@ -2993,31 +2993,10 @@ export default function App() {
                 <p className="text-sm md:text-base text-gray-600">Most liked profiles on Anurag Connect</p>
               </div>
 
-              {/* Time Period Selector */}
-              <div className="flex justify-center items-center gap-3 md:gap-4 mb-6 md:mb-8 flex-wrap">
-                <Button
-                  onClick={() => loadLeaderboard('daily')}
-                  variant={leaderboardType === 'daily' ? 'default' : 'outline'}
-                  className={`text-sm ${leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500' : ''}`}
-                >
-                  🔥 Today
-                </Button>
-                <Button
-                  onClick={() => loadLeaderboard('weekly')}
-                  variant={leaderboardType === 'weekly' ? 'default' : 'outline'}
-                  className={`text-sm ${leaderboardType === 'weekly' ? 'bg-gradient-to-r from-yellow-500 to-orange-500' : ''}`}
-                >
-                  ⭐ This Week
-                </Button>
+              {/* Refresh Button Only */}
+              <div className="flex justify-center items-center gap-3 md:gap-4 mb-6 md:mb-8">
                 <Button
                   onClick={() => loadLeaderboard('alltime')}
-                  variant={leaderboardType === 'alltime' ? 'default' : 'outline'}
-                  className={`text-sm ${leaderboardType === 'alltime' ? 'bg-gradient-to-r from-purple-500 to-pink-500' : ''}`}
-                >
-                  👑 All Time
-                </Button>
-                <Button
-                  onClick={() => loadLeaderboard(leaderboardType)}
                   variant="outline"
                   className="text-sm"
                   disabled={loadingLeaderboard}
