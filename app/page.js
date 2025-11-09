@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -1091,6 +1091,39 @@ export default function App() {
       }
     } catch (error) {
       toast.error('Something went wrong!')
+    }
+  }
+
+  const handleUnlike = async (profileId) => {
+    try {
+      // Decrement like count only (don't remove friend request)
+      const response = await fetch('/api/decrement-like', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId })
+      })
+      const data = await response.json()
+      
+      if (response.ok) {
+        console.log('✅ Like count decremented:', data)
+        toast.success('💔 Unliked!')
+        
+        // Remove from liked profiles set
+        const newLikedProfiles = new Set(likedProfiles)
+        newLikedProfiles.delete(profileId)
+        setLikedProfiles(newLikedProfiles)
+        
+        // Refresh leaderboard if viewing it
+        if (leaderboardData.length > 0) {
+          console.log('🔄 Refreshing leaderboard after unlike...')
+          setTimeout(() => loadLeaderboard(leaderboardType), 500)
+        }
+      } else {
+        toast.error(data.error || 'Failed to unlike')
+      }
+    } catch (error) {
+      console.error('❌ Failed to unlike:', error)
+      toast.error('Failed to unlike')
     }
   }
 
@@ -2781,14 +2814,18 @@ export default function App() {
                             )}
                           </div>
 
-                          {/* Enhanced already liked badge or Send Request button */}
+                          {/* Unlike button or Send Request button */}
                           {likedProfiles.has(profiles[currentProfileIndex].id) ? (
-                            <div className="absolute top-6 right-6 backdrop-blur-xl bg-green-500/90 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl animate-pulse border-2 border-white/50">
-                              <div className="flex items-center gap-2">
-                                <Heart className="h-4 w-4 fill-white" />
-                                <span>Request Sent</span>
-                              </div>
-                            </div>
+                            <Button
+                              className="absolute top-6 right-6 backdrop-blur-xl bg-red-500/90 hover:bg-red-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleUnlike(profiles[currentProfileIndex].id)
+                              }}
+                            >
+                              <HeartCrack className="h-4 w-4 mr-2" />
+                              Unlike
+                            </Button>
                           ) : (
                             <Button
                               className="absolute top-6 right-6 backdrop-blur-xl bg-pink-500/90 hover:bg-pink-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
@@ -3323,7 +3360,7 @@ export default function App() {
                                 <Eye className="h-4 w-4 mr-2" />
                                 View
                               </Button>
-                              {!likedProfiles.has(profile.id) && (
+                              {!likedProfiles.has(profile.id) ? (
                                 <Button
                                   onClick={(e) => {
                                     e.stopPropagation()
@@ -3334,11 +3371,17 @@ export default function App() {
                                   <Heart className="h-4 w-4 mr-2" />
                                   Like
                                 </Button>
-                              )}
-                              {likedProfiles.has(profile.id) && (
-                                <Button disabled variant="secondary">
-                                  <Heart className="h-4 w-4 mr-2 fill-current" />
-                                  Liked
+                              ) : (
+                                <Button 
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleUnlike(profile.id)
+                                  }}
+                                  variant="outline" 
+                                  className="border-2 border-red-300 hover:bg-red-50 text-red-600"
+                                >
+                                  <HeartCrack className="h-4 w-4 mr-2" />
+                                  Unlike
                                 </Button>
                               )}
                             </div>
@@ -3417,9 +3460,16 @@ export default function App() {
                                   Like
                                 </Button>
                               ) : (
-                                <Button disabled variant="secondary" className="flex-1">
-                                  <Heart className="h-4 w-4 mr-2 fill-current" />
-                                  Liked
+                                <Button 
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleUnlike(profile.id)
+                                  }}
+                                  variant="outline" 
+                                  className="flex-1 border-2 border-red-300 hover:bg-red-50 text-red-600"
+                                >
+                                  <HeartCrack className="h-4 w-4 mr-2" />
+                                  Unlike
                                 </Button>
                               )}
                             </div>

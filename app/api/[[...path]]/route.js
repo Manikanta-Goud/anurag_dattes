@@ -1676,6 +1676,74 @@ async function handleIncrementLike(request) {
   }
 }
 
+async function handleDecrementLike(request) {
+  try {
+    const { profileId } = await request.json()
+
+    if (!profileId) {
+      return NextResponse.json(
+        { error: 'Profile ID is required' },
+        { status: 400 }
+      )
+    }
+
+    console.log('Decrementing like for profile:', profileId)
+
+    // Get current values
+    const { data: profile, error: fetchError } = await supabase
+      .from('profiles')
+      .select('total_likes, daily_likes, weekly_likes')
+      .eq('id', profileId)
+      .single()
+
+    if (fetchError) {
+      console.error('Error fetching profile:', fetchError)
+      return NextResponse.json(
+        { error: 'Profile not found', details: fetchError.message },
+        { status: 404 }
+      )
+    }
+
+    console.log('Current likes before decrement:', profile)
+
+    const newCounts = {
+      total_likes: Math.max((profile.total_likes || 0) - 1, 0),
+      daily_likes: Math.max((profile.daily_likes || 0) - 1, 0),
+      weekly_likes: Math.max((profile.weekly_likes || 0) - 1, 0)
+    }
+
+    console.log('Updating to:', newCounts)
+
+    // Update with decremented values
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update(newCounts)
+      .eq('id', profileId)
+
+    if (updateError) {
+      console.error('Error updating likes:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to update likes', details: updateError.message },
+        { status: 500 }
+      )
+    }
+
+    console.log('✅ Like count decremented successfully:', newCounts)
+
+    return NextResponse.json({
+      success: true,
+      message: 'Like count decremented',
+      newCounts
+    })
+  } catch (error) {
+    console.error('handleDecrementLike error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 async function handleRemoveFriend(request) {
   try {
     const { userId1, userId2 } = await request.json()
@@ -1792,6 +1860,8 @@ export async function POST(request) {
     return handleRemoveFriend(request)
   } else if (pathname.includes('/api/increment-like')) {
     return handleIncrementLike(request)
+  } else if (pathname.includes('/api/decrement-like')) {
+    return handleDecrementLike(request)
   } else if (pathname.includes('/api/increment-view')) {
     return handleIncrementView(request)
   }
