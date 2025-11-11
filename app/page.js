@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -17,6 +17,7 @@ export default function App() {
   const [view, setView] = useState('landing') // landing, auth, profile-setup, main, profile, welcome
   const [authMode, setAuthMode] = useState('login') // login, signup
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true) // Show welcome screen after login
+  const [mainNav, setMainNav] = useState('home') // home, events, etc. - main navigation sections
   const [profiles, setProfiles] = useState([])
   const [matches, setMatches] = useState([])
   const [selectedMatch, setSelectedMatch] = useState(null)
@@ -2680,38 +2681,166 @@ export default function App() {
           </div>
         )}
 
-        <Tabs 
-          defaultValue="discover" 
-          value={activeTab}
-          className="w-full overflow-x-hidden"
-          onValueChange={(value) => {
-            setActiveTab(value)
-            if (value === 'leaderboard') {
-              loadLeaderboard(leaderboardType)
-            }
-          }}
-        >
-          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-5 mb-8">
-            <TabsTrigger value="discover">Discover</TabsTrigger>
-            <TabsTrigger value="leaderboard">🏆 Top</TabsTrigger>
-            <TabsTrigger value="search">Search</TabsTrigger>
-            <TabsTrigger value="matches" className="relative">
-              Friends
-              {unreadMessages.size > 0 && (
-                <span className="absolute -top-1 -right-1 h-5 w-5 md:h-6 md:w-6 bg-red-500 text-white text-xs md:text-sm font-bold rounded-full flex items-center justify-center animate-pulse z-10">
-                  {unreadMessages.size}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="blocked" className="relative">
-              Blocked
-              {blockedUsersList.length > 0 && (
-                <span className="absolute -top-1 -right-1 h-5 w-5 md:h-6 md:w-6 bg-gray-500 text-white text-xs md:text-sm font-bold rounded-full flex items-center justify-center z-10">
-                  {blockedUsersList.length}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
+        {/* Main Navigation Bar - Home, Events, etc. */}
+        {/* Gradient border wrapper - shows gradient on all four sides */}
+        <div className="sticky top-0 z-40 p-1 rounded-3xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 shadow-xl">
+          <div className="max-w-4xl mx-auto px-1">
+            <div className="bg-white/95 rounded-2xl shadow-lg backdrop-blur-md px-4 py-4">
+              <div className="flex justify-center gap-3 md:gap-4">
+                {/* Home Button */}
+                <button
+                  onClick={() => setMainNav('home')}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
+                    mainNav === 'home'
+                      ? 'bg-gradient-to-r from-pink-500 via-purple-500 to-pink-600 text-white shadow-xl shadow-pink-300/50 scale-105'
+                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-pink-100 hover:to-purple-100 shadow-md hover:shadow-lg border-2 border-purple-200'
+                  }`}
+                >
+                  <Home className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'home' ? 'animate-pulse' : ''}`} />
+                  <span className="hidden sm:inline">Home</span>
+                  {(unreadMessages.size > 0 || blockedUsersList.length > 0) && (
+                    <span className="absolute -top-1 -right-1 flex h-5 w-5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 border-2 border-white items-center justify-center">
+                        <span className="text-white text-[10px] font-bold">{unreadMessages.size + blockedUsersList.length}</span>
+                      </span>
+                    </span>
+                  )}
+                </button>
+
+                {/* Events Button - Placeholder for future */}
+                <button
+                  onClick={() => setMainNav('events')}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
+                    mainNav === 'events'
+                      ? 'bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-600 text-white shadow-xl shadow-blue-300/50 scale-105'
+                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 shadow-md hover:shadow-lg border-2 border-blue-200'
+                  }`}
+                >
+                  <Calendar className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'events' ? 'animate-pulse' : ''}`} />
+                  <span className="hidden sm:inline">Events</span>
+                  <Badge className="absolute -top-2 -right-2 bg-gradient-to-r from-yellow-400 to-orange-400 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border-2 border-white animate-bounce">
+                    SOON
+                  </Badge>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Home Section - Contains Discover, Top, Search, Friends, Blocked */}
+        {mainNav === 'home' && (
+          <Tabs 
+            defaultValue="discover" 
+            value={activeTab}
+            className="w-full overflow-x-hidden"
+            onValueChange={(value) => {
+              setActiveTab(value)
+              if (value === 'leaderboard') {
+                loadLeaderboard(leaderboardType)
+              }
+            }}
+          >
+            {/* Desktop TabsList - Premium Grid with Animations */}
+            <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-5 mb-8 bg-white shadow-lg rounded-2xl p-2 border-2 border-purple-100 gap-2">
+              <TabsTrigger 
+                value="discover"
+                className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-pink-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-pink-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
+              >
+                Discover
+              </TabsTrigger>
+              <TabsTrigger 
+                value="leaderboard"
+                className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-yellow-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-yellow-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
+              >
+                🏆 Top
+              </TabsTrigger>
+              <TabsTrigger 
+                value="search"
+                className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
+              >
+                Search
+              </TabsTrigger>
+              <TabsTrigger 
+                value="matches" 
+                className="relative data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-green-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
+              >
+                Friends
+                {unreadMessages.size > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-6 w-6">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-6 w-6 bg-red-500 text-white text-xs font-bold items-center justify-center z-10 border-2 border-white shadow-lg">
+                      {unreadMessages.size}
+                    </span>
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger 
+                value="blocked" 
+                className="relative data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-gray-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
+              >
+                Blocked
+                {blockedUsersList.length > 0 && (
+                  <span className="absolute -top-1 -right-1 h-6 w-6 bg-gray-600 text-white text-xs font-bold rounded-full flex items-center justify-center z-10 border-2 border-white shadow-lg">
+                    {blockedUsersList.length}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Mobile TabsList - Zig-Zag Layout with proper structure */}
+            <TabsList className="md:hidden mb-8 px-3 h-auto flex-col gap-2 bg-transparent animate-fade-in">
+              {/* Row 1 - 3 items */}
+              <div className="flex gap-2 justify-center w-full animate-slide-in-up" style={{animationDelay: '0.1s'}}>
+                <TabsTrigger 
+                  value="discover" 
+                  className="flex-1 max-w-[110px] rounded-full shadow-lg bg-gradient-to-br from-pink-50 to-purple-50 data-[state=active]:from-pink-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-pink-300/50 border-2 border-pink-200 data-[state=active]:border-pink-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
+                >
+                  Discover
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="leaderboard" 
+                  className="flex-1 max-w-[110px] rounded-full shadow-lg bg-gradient-to-br from-yellow-50 to-orange-50 data-[state=active]:from-yellow-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-yellow-300/50 border-2 border-yellow-200 data-[state=active]:border-yellow-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
+                >
+                  🏆 Top
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="search" 
+                  className="flex-1 max-w-[110px] rounded-full shadow-lg bg-gradient-to-br from-blue-50 to-cyan-50 data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-blue-300/50 border-2 border-blue-200 data-[state=active]:border-blue-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
+                >
+                  Search
+                </TabsTrigger>
+              </div>
+              
+              {/* Row 2 - 2 items (centered, creating zig-zag effect) */}
+              <div className="flex gap-2 justify-center w-full animate-slide-in-up" style={{animationDelay: '0.2s'}}>
+                <TabsTrigger 
+                  value="matches" 
+                  className="relative flex-1 max-w-[170px] rounded-full shadow-lg bg-gradient-to-br from-green-50 to-emerald-50 data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-green-300/50 border-2 border-green-200 data-[state=active]:border-green-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
+                >
+                  Friends
+                  {unreadMessages.size > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-5 w-5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 text-white text-[10px] font-bold items-center justify-center z-10 border-2 border-white shadow-lg">
+                        {unreadMessages.size}
+                      </span>
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="blocked" 
+                  className="relative flex-1 max-w-[170px] rounded-full shadow-lg bg-gradient-to-br from-gray-50 to-slate-50 data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-gray-300/50 border-2 border-gray-200 data-[state=active]:border-gray-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
+                >
+                  Blocked
+                  {blockedUsersList.length > 0 && (
+                    <span className="absolute -top-1 -right-1 h-5 w-5 bg-gray-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center z-10 border-2 border-white shadow-lg">
+                      {blockedUsersList.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </div>
+            </TabsList>
 
           {/* Discover Tab */}
           <TabsContent value="discover" className="overflow-x-hidden">
@@ -4226,6 +4355,64 @@ export default function App() {
             </div>
           </TabsContent>
         </Tabs>
+        )}
+
+        {/* Events Section - Placeholder for future implementation */}
+        {mainNav === 'events' && (
+          <div className="max-w-4xl mx-auto px-4 py-12 animate-fade-in">
+            <Card className="border-4 border-blue-200 shadow-2xl bg-gradient-to-br from-blue-50 via-white to-cyan-50 overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-500 animate-pulse"></div>
+              
+              <CardContent className="text-center py-16 px-6">
+                {/* Animated Icon */}
+                <div className="mb-8 relative">
+                  <div className="absolute inset-0 bg-blue-400 blur-3xl opacity-30 animate-pulse"></div>
+                  <div className="relative inline-flex items-center justify-center w-32 h-32 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full shadow-2xl animate-bounce-slow">
+                    <Calendar className="h-16 w-16 text-white" />
+                  </div>
+                </div>
+
+                {/* Title */}
+                <h2 className="text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-600 mb-6 animate-pulse">
+                  Events Coming Soon! 🎉
+                </h2>
+
+                {/* Description */}
+                <div className="space-y-4 max-w-2xl mx-auto">
+                  <p className="text-gray-700 text-xl font-semibold">
+                    Stay tuned for exciting campus events and activities
+                  </p>
+                  <p className="text-gray-600 text-lg">
+                    📅 University festivals and celebrations
+                  </p>
+                  <p className="text-gray-600 text-lg">
+                    🎭 Cultural and talent shows
+                  </p>
+                  <p className="text-gray-600 text-lg">
+                    🎓 Workshops and seminars
+                  </p>
+                  <p className="text-gray-600 text-lg">
+                    🏆 Competitions and tournaments
+                  </p>
+                </div>
+
+                {/* Status Badge */}
+                <div className="mt-10">
+                  <Badge className="bg-gradient-to-r from-yellow-400 via-orange-400 to-yellow-400 text-gray-900 text-lg font-black px-8 py-3 rounded-full shadow-lg animate-pulse">
+                    🚀 UNDER DEVELOPMENT
+                  </Badge>
+                </div>
+
+                {/* Coming Soon Animation */}
+                <div className="mt-8 flex items-center justify-center gap-2">
+                  <div className="h-3 w-3 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                  <div className="h-3 w-3 bg-cyan-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                  <div className="h-3 w-3 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Full Profile Modal - Works for all tabs */}
         {showProfileModal && selectedProfile && (
