@@ -3,9 +3,9 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "dev": "next dev --port 3001",
-        "dev:no-reload": "next dev --port 3001",
-        "dev:webpack": "next dev --port 3001",
+        "dev": "next dev --port 3000",
+        "dev:no-reload": "next dev --port 3000",
+        "dev:webpack": "next dev --port 3000",
         "build": "next build",
         "start": "next start"
     },
