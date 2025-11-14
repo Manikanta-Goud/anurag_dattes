@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Shield, Users, MessageSquare, Heart, TrendingUp, Eye, LogOut, Search, Clock, Mail, AlertTriangle, X, User, Ban, Trash2 } from 'lucide-react'
+import { Shield, Users, MessageSquare, Heart, TrendingUp, Eye, LogOut, Search, Clock, Mail, AlertTriangle, X, User, Ban, Trash2, Calendar, Plus, Edit, MapPin, UserCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,6 +44,29 @@ export default function AdminPanel() {
   // Banned users
   const [bannedUsers, setBannedUsers] = useState([])
   const [unbanningUserId, setUnbanningUserId] = useState(null)
+
+  // Events management
+  const [events, setEvents] = useState([])
+  const [showEventModal, setShowEventModal] = useState(false)
+  const [editingEvent, setEditingEvent] = useState(null)
+  const [eventForm, setEventForm] = useState({
+    title: '',
+    description: '',
+    event_date: '',
+    event_time: '',
+    venue: '',
+    club_name: '',
+    organizer: '',
+    guests: '',
+    category: 'Technical',
+    image_url: '',
+    max_capacity: '',
+    registration_required: false,
+    registration_link: '',
+    contact_email: '',
+    contact_phone: ''
+  })
+  const [savingEvent, setSavingEvent] = useState(false)
 
   // Check if admin is logged in
   useEffect(() => {
@@ -120,6 +143,11 @@ export default function AdminPanel() {
       const bannedRes = await fetch('/api/admin/banned-users')
       const bannedData = await bannedRes.json()
       setBannedUsers(bannedData.bannedUsers || [])
+
+      // Load events
+      const eventsRes = await fetch('/api/events?status=all')
+      const eventsData = await eventsRes.json()
+      setEvents(eventsData.events || [])
     } catch (error) {
       console.error('Error loading admin data:', error)
     }
@@ -501,11 +529,12 @@ export default function AdminPanel() {
 
         {/* Tabs */}
         <Tabs defaultValue="users" className="w-full">
-          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8">
+          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-5 mb-8">
             <TabsTrigger value="users">All Users</TabsTrigger>
             <TabsTrigger value="new">New Users</TabsTrigger>
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
             <TabsTrigger value="banned">Banned Users</TabsTrigger>
+            <TabsTrigger value="events">Events</TabsTrigger>
           </TabsList>
 
           {/* All Users Tab */}
@@ -848,6 +877,193 @@ export default function AdminPanel() {
                           >
                             {unbanningUserId === ban.userId ? 'Unbanning...' : 'Unban User'}
                           </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Events Tab */}
+          <TabsContent value="events">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-purple-600">
+                      <Calendar className="h-5 w-5" />
+                      Events Management
+                    </CardTitle>
+                    <CardDescription>
+                      Create and manage college events, workshops, and activities
+                    </CardDescription>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setEditingEvent(null)
+                      setEventForm({
+                        title: '',
+                        description: '',
+                        event_date: '',
+                        event_time: '',
+                        venue: '',
+                        club_name: '',
+                        organizer: '',
+                        guests: '',
+                        category: 'Technical',
+                        image_url: '',
+                        max_capacity: '',
+                        registration_required: false,
+                        registration_link: '',
+                        contact_email: '',
+                        contact_phone: ''
+                      })
+                      setShowEventModal(true)
+                    }}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Event
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {events.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <Calendar className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg">No events created yet</p>
+                      <p className="text-sm">Create your first event to get started</p>
+                    </div>
+                  ) : (
+                    events.map((event) => (
+                      <div key={event.id} className="p-4 border-2 border-purple-200 bg-purple-50 rounded-lg">
+                        <div className="flex gap-4">
+                          {event.image_url && (
+                            <img 
+                              src={event.image_url} 
+                              alt={event.title}
+                              className="w-32 h-32 object-cover rounded-lg"
+                            />
+                          )}
+                          <div className="flex-1">
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-bold text-xl text-purple-900">{event.title}</h3>
+                                  <Badge className={
+                                    event.status === 'upcoming' ? 'bg-blue-500' :
+                                    event.status === 'ongoing' ? 'bg-green-500' :
+                                    'bg-gray-500'
+                                  }>
+                                    {event.status}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-gray-600 mt-1">{event.description}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setEditingEvent(event)
+                                    setEventForm({
+                                      title: event.title,
+                                      description: event.description,
+                                      event_date: event.event_date,
+                                      event_time: event.event_time,
+                                      venue: event.venue,
+                                      club_name: event.club_name || '',
+                                      organizer: event.organizer || '',
+                                      guests: event.guests || '',
+                                      category: event.category,
+                                      image_url: event.image_url || '',
+                                      max_capacity: event.max_capacity || '',
+                                      registration_required: event.registration_required,
+                                      registration_link: event.registration_link || '',
+                                      contact_email: event.contact_email || '',
+                                      contact_phone: event.contact_phone || ''
+                                    })
+                                    setShowEventModal(true)
+                                  }}
+                                  className="text-blue-600 hover:text-blue-700"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={async () => {
+                                    if (confirm(`Delete event "${event.title}"?`)) {
+                                      try {
+                                        const response = await fetch(`/api/events/delete?eventId=${event.id}`, {
+                                          method: 'DELETE'
+                                        })
+                                        if (response.ok) {
+                                          setEvents(events.filter(e => e.id !== event.id))
+                                          alert('Event deleted successfully!')
+                                        } else {
+                                          alert('Failed to delete event')
+                                        }
+                                      } catch (error) {
+                                        console.error('Error deleting event:', error)
+                                        alert('Error deleting event')
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <Ban className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4 mt-4">
+                              <div className="flex items-center gap-2 text-sm text-gray-700">
+                                <Calendar className="h-4 w-4 text-purple-600" />
+                                <span>{new Date(event.event_date).toLocaleDateString()}</span>
+                                <span className="text-gray-500">at {event.event_time}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-sm text-gray-700">
+                                <MapPin className="h-4 w-4 text-purple-600" />
+                                <span>{event.venue}</span>
+                              </div>
+                              {event.organizer && (
+                                <div className="flex items-center gap-2 text-sm text-gray-700">
+                                  <UserCircle className="h-4 w-4 text-purple-600" />
+                                  <span>Organized by: {event.organizer}</span>
+                                </div>
+                              )}
+                              {event.guests && (
+                                <div className="flex items-center gap-2 text-sm text-gray-700">
+                                  <span className="font-semibold text-purple-600">Guests:</span>
+                                  <span>{event.guests}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex gap-4 mt-3 flex-wrap">
+                              <Badge variant="outline">{event.category}</Badge>
+                              {event.club_name && (
+                                <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200">
+                                  🎯 {event.club_name}
+                                </Badge>
+                              )}
+                              {event.max_capacity && (
+                                <Badge variant="outline">Max: {event.max_capacity} people</Badge>
+                              )}
+                              {event.registration_required && (
+                                <Badge className="bg-orange-500">Registration Required</Badge>
+                              )}
+                            </div>
+
+                            {(event.contact_email || event.contact_phone) && (
+                              <div className="mt-3 text-xs text-gray-600">
+                                Contact: {event.contact_email} {event.contact_phone && `• ${event.contact_phone}`}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))
@@ -1294,6 +1510,283 @@ export default function AdminPanel() {
                   variant="outline"
                   disabled={deletingUser}
                   className="border-2"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Event Creation/Edit Modal */}
+      {showEventModal && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowEventModal(false)}
+        >
+          <Card 
+            className="w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-purple-600">
+                {editingEvent ? <Edit className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+                {editingEvent ? 'Edit Event' : 'Create New Event'}
+              </CardTitle>
+              <CardDescription>
+                Fill in all the details about the event
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {/* Title */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Event Title *</label>
+                  <input
+                    type="text"
+                    value={eventForm.title}
+                    onChange={(e) => setEventForm({...eventForm, title: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="e.g., Annual Tech Fest 2024"
+                    required
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Description *</label>
+                  <textarea
+                    value={eventForm.description}
+                    onChange={(e) => setEventForm({...eventForm, description: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 min-h-[100px]"
+                    placeholder="Describe the event in detail..."
+                    required
+                  />
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Event Date *</label>
+                  <input
+                    type="date"
+                    value={eventForm.event_date}
+                    onChange={(e) => setEventForm({...eventForm, event_date: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    required
+                  />
+                </div>
+
+                {/* Time */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Event Time *</label>
+                  <input
+                    type="time"
+                    value={eventForm.event_time}
+                    onChange={(e) => setEventForm({...eventForm, event_time: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    required
+                  />
+                </div>
+
+                {/* Venue */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Venue *</label>
+                  <input
+                    type="text"
+                    value={eventForm.venue}
+                    onChange={(e) => setEventForm({...eventForm, venue: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="e.g., Main Auditorium, Seminar Hall"
+                    required
+                  />
+                </div>
+
+                {/* Club Name */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Club Name</label>
+                  <input
+                    type="text"
+                    value={eventForm.club_name}
+                    onChange={(e) => setEventForm({...eventForm, club_name: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="e.g., Tech Club, Cultural Society, Sports Committee"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Which club/organization is organizing this event?</p>
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Category *</label>
+                  <select
+                    value={eventForm.category}
+                    onChange={(e) => setEventForm({...eventForm, category: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="Technical">Technical</option>
+                    <option value="Cultural">Cultural</option>
+                    <option value="Sports">Sports</option>
+                    <option value="Workshop">Workshop</option>
+                    <option value="Seminar">Seminar</option>
+                    <option value="Competition">Competition</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* Max Capacity */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Max Capacity</label>
+                  <input
+                    type="number"
+                    value={eventForm.max_capacity}
+                    onChange={(e) => setEventForm({...eventForm, max_capacity: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="e.g., 200"
+                  />
+                </div>
+
+                {/* Organizer */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Organizer</label>
+                  <input
+                    type="text"
+                    value={eventForm.organizer}
+                    onChange={(e) => setEventForm({...eventForm, organizer: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="e.g., CSE Department, Tech Club"
+                  />
+                </div>
+
+                {/* Chief Guests */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Chief Guests</label>
+                  <input
+                    type="text"
+                    value={eventForm.guests}
+                    onChange={(e) => setEventForm({...eventForm, guests: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="e.g., Dr. John Doe, CEO of TechCorp"
+                  />
+                </div>
+
+                {/* Image URL */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Event Image URL</label>
+                  <input
+                    type="url"
+                    value={eventForm.image_url}
+                    onChange={(e) => setEventForm({...eventForm, image_url: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="https://example.com/event-poster.jpg"
+                  />
+                </div>
+
+                {/* Registration Required */}
+                <div className="col-span-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={eventForm.registration_required}
+                      onChange={(e) => setEventForm({...eventForm, registration_required: e.target.checked})}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm font-semibold text-gray-700">Registration Required</span>
+                  </label>
+                </div>
+
+                {/* Registration Link (if required) */}
+                {eventForm.registration_required && (
+                  <div className="col-span-2">
+                    <label className="text-sm font-semibold text-gray-700">Registration Link</label>
+                    <input
+                      type="url"
+                      value={eventForm.registration_link}
+                      onChange={(e) => setEventForm({...eventForm, registration_link: e.target.value})}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="https://forms.google.com/..."
+                    />
+                  </div>
+                )}
+
+                {/* Contact Email */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Contact Email</label>
+                  <input
+                    type="email"
+                    value={eventForm.contact_email}
+                    onChange={(e) => setEventForm({...eventForm, contact_email: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="events@college.edu"
+                  />
+                </div>
+
+                {/* Contact Phone */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Contact Phone</label>
+                  <input
+                    type="tel"
+                    value={eventForm.contact_phone}
+                    onChange={(e) => setEventForm({...eventForm, contact_phone: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="+91 1234567890"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={async () => {
+                    if (!eventForm.title || !eventForm.description || !eventForm.event_date || !eventForm.event_time || !eventForm.venue) {
+                      alert('Please fill all required fields (*)')
+                      return
+                    }
+
+                    setSavingEvent(true)
+                    try {
+                      const url = editingEvent ? '/api/events/update' : '/api/events/create'
+                      const body = editingEvent 
+                        ? { ...eventForm, eventId: editingEvent.id }
+                        : eventForm
+
+                      const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                      })
+
+                      if (response.ok) {
+                        const data = await response.json()
+                        if (editingEvent) {
+                          setEvents(events.map(e => e.id === editingEvent.id ? data.event : e))
+                          alert('Event updated successfully!')
+                        } else {
+                          setEvents([...events, data.event])
+                          alert('Event created successfully!')
+                        }
+                        setShowEventModal(false)
+                        setEditingEvent(null)
+                      } else {
+                        alert('Failed to save event')
+                      }
+                    } catch (error) {
+                      console.error('Error saving event:', error)
+                      alert('Error saving event')
+                    } finally {
+                      setSavingEvent(false)
+                    }
+                  }}
+                  disabled={savingEvent}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700"
+                >
+                  {savingEvent ? 'Saving...' : (editingEvent ? 'Update Event' : 'Create Event')}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowEventModal(false)
+                    setEditingEvent(null)
+                  }}
+                  variant="outline"
+                  disabled={savingEvent}
                 >
                   Cancel
                 </Button>

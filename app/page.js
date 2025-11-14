@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -59,6 +59,11 @@ export default function App() {
   const [friendRequests, setFriendRequests] = useState([])
   
   // Blocked users state
+  
+  // Events state
+  const [events, setEvents] = useState([])
+  const [selectedEvent, setSelectedEvent] = useState(null)
+  const [showEventDetails, setShowEventDetails] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState(new Set())
   const [blockedUsersList, setBlockedUsersList] = useState([]) // Full profile data
 
@@ -102,7 +107,15 @@ export default function App() {
       loadMatches(JSON.parse(user).id)
       loadFriendRequests(JSON.parse(user).id)
       loadBlockedUsers(JSON.parse(user).id)
+      loadEvents() // Load events
     }
+    
+    // Auto-refresh events every 10 seconds
+    const interval = setInterval(() => {
+      loadEvents()
+    }, 10000)
+    
+    return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
@@ -651,6 +664,18 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to load matches:', error)
+    }
+  }
+
+  const loadEvents = async () => {
+    try {
+      const response = await fetch('/api/events?status=all')
+      const data = await response.json()
+      if (response.ok) {
+        setEvents(data.events || [])
+      }
+    } catch (error) {
+      console.error('Failed to load events:', error)
     }
   }
 
@@ -2277,6 +2302,170 @@ export default function App() {
     )
   }
 
+  // Helper function for category colors
+  const getCategoryColor = (category) => {
+    const colors = {
+      Technical: "bg-blue-500",
+      Cultural: "bg-purple-500",
+      Sports: "bg-green-500",
+      Workshop: "bg-yellow-500",
+      Seminar: "bg-pink-500",
+      Competition: "bg-red-500",
+    }
+    return colors[category] || "bg-gray-500"
+  }
+
+  // Event Card Component - Premium Design
+  const EventCard = ({ event }) => {
+    const getStatusBadge = (status) => {
+      const badges = {
+        upcoming: { 
+          color: "bg-gradient-to-r from-blue-500 to-blue-600", 
+          text: "Upcoming",
+          icon: "📅",
+          glow: "shadow-blue-500/50"
+        },
+        ongoing: { 
+          color: "bg-gradient-to-r from-green-500 to-emerald-600", 
+          text: "Live Now",
+          icon: "🔴",
+          glow: "shadow-green-500/50 animate-pulse"
+        },
+        completed: { 
+          color: "bg-gradient-to-r from-gray-500 to-gray-600", 
+          text: "Completed",
+          icon: "✓",
+          glow: "shadow-gray-500/50"
+        },
+        cancelled: { 
+          color: "bg-gradient-to-r from-red-500 to-red-600", 
+          text: "Cancelled",
+          icon: "✕",
+          glow: "shadow-red-500/50"
+        },
+      }
+      return badges[status] || badges.upcoming
+    }
+
+    const statusBadge = getStatusBadge(event.status)
+
+    return (
+      <div 
+        className="group relative bg-white rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-500 cursor-pointer transform hover:-translate-y-3 border border-gray-100 hover:border-purple-200"
+        onClick={() => {
+          setSelectedEvent(event)
+          setShowEventDetails(true)
+        }}
+      >
+        {/* Gradient Overlay Effect */}
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-50/0 to-blue-50/0 group-hover:from-purple-50/50 group-hover:to-blue-50/50 transition-all duration-500 pointer-events-none z-10"></div>
+        
+        {/* Event Image */}
+        <div className="relative h-56 bg-gradient-to-br from-indigo-400 via-purple-400 to-pink-400 overflow-hidden">
+          {event.image_url ? (
+            <img
+              src={event.image_url}
+              alt={event.title}
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full backdrop-blur-sm">
+              <div className="relative">
+                <div className="absolute inset-0 bg-white/20 blur-2xl animate-pulse"></div>
+                <Calendar className="relative h-20 w-20 text-white drop-shadow-lg" />
+              </div>
+            </div>
+          )}
+          
+          {/* Dark Overlay for Text Readability */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent"></div>
+          
+          {/* Status Badge */}
+          <div className={`absolute top-4 right-4 ${statusBadge.color} ${statusBadge.glow} text-white px-4 py-2 rounded-full text-sm font-bold shadow-2xl backdrop-blur-sm flex items-center gap-2`}>
+            <span>{statusBadge.icon}</span>
+            <span>{statusBadge.text}</span>
+          </div>
+          
+          {/* Category Badge */}
+          <div className={`absolute top-4 left-4 ${getCategoryColor(event.category)} text-white px-4 py-2 rounded-full text-sm font-bold shadow-2xl backdrop-blur-sm`}>
+            {event.category}
+          </div>
+
+          {/* Date Badge - Bottom Corner */}
+          <div className="absolute bottom-4 left-4 bg-white/95 backdrop-blur-sm rounded-xl p-3 shadow-lg">
+            <div className="text-center">
+              <div className="text-2xl font-black text-purple-600">
+                {new Date(event.event_date).getDate()}
+              </div>
+              <div className="text-xs font-bold text-gray-600 uppercase">
+                {new Date(event.event_date).toLocaleDateString('en-US', { month: 'short' })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Event Details */}
+        <div className="relative p-6 space-y-4">
+          <div>
+            <h3 className="text-xl font-black text-gray-900 mb-2 line-clamp-2 group-hover:text-purple-600 transition-colors">
+              {event.title}
+            </h3>
+            <p className="text-gray-600 text-sm mb-3 line-clamp-2 leading-relaxed">
+              {event.description}
+            </p>
+          </div>
+
+          {/* Info Grid */}
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-3 text-gray-700 bg-blue-50/50 rounded-lg p-2">
+              <div className="bg-blue-100 p-2 rounded-lg">
+                <Clock className="h-4 w-4 text-blue-600" />
+              </div>
+              <span className="text-sm font-semibold">{event.event_time}</span>
+            </div>
+            
+            <div className="flex items-center gap-3 text-gray-700 bg-red-50/50 rounded-lg p-2">
+              <div className="bg-red-100 p-2 rounded-lg">
+                <MapPin className="h-4 w-4 text-red-600" />
+              </div>
+              <span className="text-sm font-semibold line-clamp-1">{event.venue}</span>
+            </div>
+          </div>
+
+          {/* Club & Organizer */}
+          {(event.club_name || event.organizer) && (
+            <div className="pt-3 border-t border-gray-100 space-y-2">
+              {event.club_name && (
+                <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-purple-50 px-3 py-2 rounded-lg">
+                  <span className="text-sm font-bold text-indigo-700">🎯 {event.club_name}</span>
+                </div>
+              )}
+              {event.organizer && (
+                <div className="flex items-center gap-2 text-gray-600">
+                  <Users className="h-4 w-4" />
+                  <span className="text-xs font-medium">Organized by {event.organizer}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Registration Button */}
+          {event.registration_required && (
+            <div className="pt-3">
+              <button className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-3 px-6 rounded-xl font-bold hover:shadow-2xl hover:shadow-purple-500/50 transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 group">
+                <span>Register Now</span>
+                <span className="group-hover:translate-x-1 transition-transform">→</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Hover Effect Border */}
+        <div className="absolute inset-0 rounded-2xl border-2 border-transparent group-hover:border-purple-300 transition-all duration-300 pointer-events-none"></div>
+      </div>
+    )
+  }
+
   // Main App
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 overflow-x-hidden">
@@ -2332,32 +2521,33 @@ export default function App() {
       </div>
 
       {/* Help Modal */}
+      {/* Help Modal - Fully Responsive */}
       {showHelpModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowHelpModal(false)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4" onClick={() => setShowHelpModal(false)}>
+          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-md w-full animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-6 rounded-t-3xl text-white">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-white/20 backdrop-blur-lg rounded-full p-3">
-                    <Mail className="h-8 w-8" />
+            <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-4 sm:p-5 md:p-6 rounded-t-2xl sm:rounded-t-3xl text-white">
+              <div className="flex items-center justify-between mb-2 sm:mb-4">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="bg-white/20 backdrop-blur-lg rounded-full p-2 sm:p-2.5 md:p-3">
+                    <Mail className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8" />
                   </div>
-                  <h2 className="text-2xl font-bold">Need Help?</h2>
+                  <h2 className="text-lg sm:text-xl md:text-2xl font-bold">Need Help?</h2>
                 </div>
                 <button 
                   onClick={() => setShowHelpModal(false)}
-                  className="p-1 hover:bg-white/20 rounded-full transition-colors"
+                  className="p-1 hover:bg-white/20 rounded-full transition-colors flex-shrink-0"
                 >
-                  <X className="h-6 w-6" />
+                  <X className="h-5 w-5 sm:h-6 sm:w-6" />
                 </button>
               </div>
-              <p className="text-white/90">We're here to support you!</p>
+              <p className="text-white/90 text-xs sm:text-sm md:text-base">We're here to support you!</p>
             </div>
 
             {/* Content */}
-            <div className="p-6 space-y-4">
-              <div className="text-center space-y-3">
-                <p className="text-gray-700 font-medium">
+            <div className="p-4 sm:p-5 md:p-6 space-y-3 sm:space-y-4">
+              <div className="text-center space-y-2 sm:space-y-3">
+                <p className="text-gray-700 font-medium text-xs sm:text-sm md:text-base px-2">
                   📱 For any queries, DM me on Instagram
                 </p>
                 
@@ -2365,15 +2555,15 @@ export default function App() {
                   href="https://www.instagram.com/anurag_slines?utm_source=qr&igsh=ZThxb3B2MnNqaTJ1"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+                  className="inline-flex items-center gap-1.5 sm:gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-5 md:px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base"
                 >
-                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                  <svg className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
                   </svg>
-                  @anurag_slines
+                  <span className="whitespace-nowrap">@anurag_slines</span>
                 </a>
                 
-                <p className="text-sm text-purple-600 font-semibold">
+                <p className="text-[10px] sm:text-xs md:text-sm text-purple-600 font-semibold px-2">
                   👉 Follow for updates and announcements!
                 </p>
               </div>
@@ -2382,22 +2572,22 @@ export default function App() {
         </div>
       )}
 
-      {/* Notifications Modal */}
+      {/* Notifications Modal - Fully Responsive */}
       {showNotifications && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowNotifications(false)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4" onClick={() => setShowNotifications(false)}>
+          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div className="flex-shrink-0 p-4 md:p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50 sticky top-0">
+            <div className="flex-shrink-0 p-3 sm:p-4 md:p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50 sticky top-0">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Bell className="h-6 w-6 text-purple-600" />
-                  <h3 className="text-xl md:text-2xl font-bold text-gray-800">Notifications</h3>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <Bell className="h-5 w-5 sm:h-6 sm:w-6 text-purple-600 flex-shrink-0" />
+                  <h3 className="text-base sm:text-lg md:text-xl lg:text-2xl font-bold text-gray-800">Notifications</h3>
                 </div>
                 <button 
                   onClick={() => setShowNotifications(false)}
-                  className="p-2 hover:bg-purple-100 rounded-full transition-colors"
+                  className="p-1.5 sm:p-2 hover:bg-purple-100 rounded-full transition-colors flex-shrink-0"
                 >
-                  <X className="h-5 w-5 text-gray-600" />
+                  <X className="h-4 w-4 sm:h-5 sm:w-5 text-gray-600" />
                 </button>
               </div>
               {(friendRequests.length > 0 || unreadWarningsCount > 0) && (
@@ -2604,32 +2794,32 @@ export default function App() {
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 overflow-x-hidden">
-        {/* Welcome Screen Overlay */}
+        {/* Welcome Screen Overlay - Fully Responsive for ALL Devices */}
         {showWelcomeScreen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full animate-in fade-in zoom-in duration-300">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-y-auto">
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-md md:max-w-lg w-full my-auto animate-in fade-in zoom-in duration-300">
               {/* Header */}
-              <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-8 rounded-t-3xl text-white text-center">
-                <div className="flex justify-center mb-4">
-                  <div className="bg-white/20 backdrop-blur-lg rounded-full p-4">
-                    <Heart className="h-12 w-12" />
+              <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-4 sm:p-6 md:p-8 rounded-t-2xl sm:rounded-t-3xl text-white text-center">
+                <div className="flex justify-center mb-3 sm:mb-4">
+                  <div className="bg-white/20 backdrop-blur-lg rounded-full p-2.5 sm:p-3 md:p-4">
+                    <Heart className="h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12" />
                   </div>
                 </div>
-                <h2 className="text-3xl font-bold mb-2">Welcome to Anurag Connect!</h2>
-                <p className="text-white/90 text-lg">Let's get started! 🚀</p>
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-1 sm:mb-2 leading-tight px-2">Welcome to Anurag Connect!</h2>
+                <p className="text-white/90 text-sm sm:text-base md:text-lg">Let's get started! 🚀</p>
               </div>
 
-              {/* Content */}
-              <div className="p-8 space-y-6">
+              {/* Content - Scrollable on small screens */}
+              <div className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-5 md:space-y-6 max-h-[60vh] sm:max-h-[65vh] overflow-y-auto">
                 {/* Welcome Info */}
-                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-6 border-2 border-purple-200">
-                  <div className="flex items-start gap-4">
-                    <div className="bg-purple-500 rounded-full p-3 flex-shrink-0">
-                      <Users className="h-6 w-6 text-white" />
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl sm:rounded-2xl p-3 sm:p-4 md:p-6 border-2 border-purple-200">
+                  <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
+                    <div className="bg-purple-500 rounded-full p-2 sm:p-2.5 md:p-3 flex-shrink-0">
+                      <Users className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                     </div>
-                    <div>
-                      <h3 className="font-bold text-purple-900 mb-2 text-lg">Start Making Connections!</h3>
-                      <p className="text-sm text-gray-700">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-purple-900 mb-1 sm:mb-2 text-sm sm:text-base md:text-lg leading-tight">Start Making Connections!</h3>
+                      <p className="text-xs sm:text-sm text-gray-700 leading-relaxed">
                         Find friends, make connections, and build meaningful relationships. 
                         Be respectful and enjoy your experience! 💖
                       </p>
@@ -2637,14 +2827,14 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Instagram Contact - Mandatory */}
-                <div className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-2xl p-5 border-2 border-pink-300 shadow-md">
-                  <div className="text-center space-y-3">
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <Mail className="h-5 w-5 text-pink-600" />
-                      <h3 className="font-bold text-pink-900 text-base">Need Help? Contact Me!</h3>
+                {/* Instagram Contact - Fully Responsive */}
+                <div className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-xl sm:rounded-2xl p-3 sm:p-4 md:p-5 border-2 border-pink-300 shadow-md">
+                  <div className="text-center space-y-2 sm:space-y-2.5 md:space-y-3">
+                    <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-1 sm:mb-2">
+                      <Mail className="h-4 w-4 sm:h-5 sm:w-5 text-pink-600 flex-shrink-0" />
+                      <h3 className="font-bold text-pink-900 text-xs sm:text-sm md:text-base leading-tight">Need Help? Contact Me!</h3>
                     </div>
-                    <p className="text-xs text-gray-700">
+                    <p className="text-[10px] sm:text-xs text-gray-700 px-2">
                       📱 For any queries or support, DM me on Instagram
                     </p>
                     
@@ -2652,27 +2842,27 @@ export default function App() {
                       href="https://www.instagram.com/anurag_slines?utm_source=qr&igsh=ZThxb3B2MnNqaTJ1"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+                      className="inline-flex items-center gap-1.5 sm:gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-2 sm:py-2.5 md:py-3 px-4 sm:px-5 md:px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base"
                     >
-                      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                      <svg className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
                       </svg>
-                      @anurag_slines
+                      <span className="whitespace-nowrap">@anurag_slines</span>
                     </a>
                     
-                    <p className="text-xs text-purple-700 font-semibold">
+                    <p className="text-[10px] sm:text-xs text-purple-700 font-semibold px-2">
                       👉 Follow for updates & announcements!
                     </p>
                   </div>
                 </div>
 
-                {/* Continue Button */}
+                {/* Continue Button - Responsive */}
                 <Button
                   onClick={() => {
                     setShowWelcomeScreen(false)
                     localStorage.setItem('hasSeenWelcome', 'true')
                   }}
-                  className="w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-bold py-4 text-lg rounded-full shadow-lg hover:shadow-xl transition-all"
+                  className="w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-bold py-3 sm:py-3.5 md:py-4 text-sm sm:text-base md:text-lg rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95"
                 >
                   Continue to App 🚀
                 </Button>
@@ -2719,9 +2909,6 @@ export default function App() {
                 >
                   <Calendar className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'events' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Events</span>
-                  <Badge className="absolute -top-2 -right-2 bg-gradient-to-r from-yellow-400 to-orange-400 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border-2 border-white animate-bounce">
-                    SOON
-                  </Badge>
                 </button>
               </div>
             </div>
@@ -4357,75 +4544,216 @@ export default function App() {
         </Tabs>
         )}
 
-        {/* Events Section - Placeholder for future implementation */}
+        {/* Events Section */}
         {mainNav === 'events' && (
-          <div className="max-w-4xl mx-auto px-4 py-12 animate-fade-in">
-            <Card className="border-4 border-blue-200 shadow-2xl bg-gradient-to-br from-blue-50 via-white to-cyan-50 overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-500 animate-pulse"></div>
+          <div className="space-y-8 animate-fade-in">
+            {/* Compact Events Header - Mobile Optimized */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 rounded-2xl lg:rounded-3xl p-4 sm:p-5 lg:p-8 shadow-lg lg:shadow-2xl">
+              {/* Animated Background Pattern */}
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-white rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+              </div>
               
-              <CardContent className="text-center py-16 px-6">
-                {/* Animated Icon */}
-                <div className="mb-8 relative">
-                  <div className="absolute inset-0 bg-blue-400 blur-3xl opacity-30 animate-pulse"></div>
-                  <div className="relative inline-flex items-center justify-center w-32 h-32 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full shadow-2xl animate-bounce-slow">
-                    <Calendar className="h-16 w-16 text-white" />
+              <div className="relative z-10">
+                <div className="flex items-start justify-between lg:mb-6">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 lg:mb-3">
+                      <div className="bg-white/20 backdrop-blur-sm p-1.5 sm:p-2 lg:p-3 rounded-lg lg:rounded-2xl">
+                        <Calendar className="h-5 w-5 sm:h-6 sm:w-6 lg:h-8 lg:w-8 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg sm:text-xl lg:text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">Campus Events</h2>
+                        <p className="text-indigo-100 font-medium text-xs sm:text-sm lg:text-base">Discover, Connect & Celebrate</p>
+                      </div>
+                    </div>
+                    
+                    {/* Description - Only visible on laptop/PC */}
+                    <p className="hidden lg:block text-white/90 text-lg max-w-2xl">
+                      Join exciting events, workshops, and activities happening across campus. Never miss an opportunity to learn, grow, and have fun!
+                    </p>
+                    
+                    {/* Event Stats - Mobile View (compact below heading) */}
+                    <div className="flex lg:hidden gap-2 mt-2.5">
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{events.filter(e => e.status === 'upcoming').length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-indigo-100 font-medium">Upcoming</div>
+                      </div>
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{events.filter(e => e.status === 'ongoing').length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-green-100 font-medium">Live Now</div>
+                      </div>
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{events.length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-purple-100 font-medium">Total</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Event Stats - Desktop View (right side) */}
+                  <div className="hidden lg:flex gap-4">
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{events.filter(e => e.status === 'upcoming').length}</div>
+                      <div className="text-xs text-indigo-100 font-medium">Upcoming</div>
+                    </div>
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{events.filter(e => e.status === 'ongoing').length}</div>
+                      <div className="text-xs text-green-100 font-medium">Live Now</div>
+                    </div>
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{events.length}</div>
+                      <div className="text-xs text-purple-100 font-medium">Total</div>
+                    </div>
                   </div>
                 </div>
+              </div>
+            </div>
 
-                {/* Title */}
-                <h2 className="text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-600 mb-6 animate-pulse">
-                  Events Coming Soon! 🎉
-                </h2>
+            {/* Premium Filter Tabs */}
+            <Tabs defaultValue="upcoming" className="w-full">
+              <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg p-2 border border-gray-100">
+                <TabsList className="grid w-full grid-cols-4 bg-gradient-to-r from-gray-50 to-gray-100 p-1 rounded-xl gap-2">
+                  <TabsTrigger 
+                    value="upcoming" 
+                    className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="hidden sm:inline">📅</span>
+                      Upcoming
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="ongoing"
+                    className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="hidden sm:inline">🔴</span>
+                      Live Now
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="completed"
+                    className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-500 data-[state=active]:to-gray-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="hidden sm:inline">✅</span>
+                      Past
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="all"
+                    className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="hidden sm:inline">🎯</span>
+                      All
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-                {/* Description */}
-                <div className="space-y-4 max-w-2xl mx-auto">
-                  <p className="text-gray-700 text-xl font-semibold">
-                    Stay tuned for exciting campus events and activities
-                  </p>
-                  <p className="text-gray-600 text-lg">
-                    📅 University festivals and celebrations
-                  </p>
-                  <p className="text-gray-600 text-lg">
-                    🎭 Cultural and talent shows
-                  </p>
-                  <p className="text-gray-600 text-lg">
-                    🎓 Workshops and seminars
-                  </p>
-                  <p className="text-gray-600 text-lg">
-                    🏆 Competitions and tournaments
-                  </p>
-                </div>
+              {/* Upcoming Events */}
+              <TabsContent value="upcoming" className="mt-6">
+                {events.filter(e => e.status === 'upcoming').length === 0 ? (
+                  <div className="text-center py-20 bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl border-2 border-dashed border-blue-200">
+                    <div className="relative inline-block mb-6">
+                      <div className="absolute inset-0 bg-blue-400 blur-2xl opacity-20 animate-pulse"></div>
+                      <Calendar className="relative h-20 w-20 mx-auto text-blue-400" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Upcoming Events</h3>
+                    <p className="text-gray-500">Check back soon for exciting campus events!</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                    {events.filter(e => e.status === 'upcoming').map((event) => (
+                      <EventCard key={event.id} event={event} />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
 
-                {/* Status Badge */}
-                <div className="mt-10">
-                  <Badge className="bg-gradient-to-r from-yellow-400 via-orange-400 to-yellow-400 text-gray-900 text-lg font-black px-8 py-3 rounded-full shadow-lg animate-pulse">
-                    🚀 UNDER DEVELOPMENT
-                  </Badge>
-                </div>
+              {/* Ongoing Events */}
+              <TabsContent value="ongoing" className="mt-6">
+                {events.filter(e => e.status === 'ongoing').length === 0 ? (
+                  <div className="text-center py-20 bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border-2 border-dashed border-green-200">
+                    <div className="relative inline-block mb-6">
+                      <div className="absolute inset-0 bg-green-400 blur-2xl opacity-20 animate-pulse"></div>
+                      <div className="relative flex items-center justify-center">
+                        <div className="absolute h-20 w-20 bg-green-400 rounded-full opacity-20 animate-ping"></div>
+                        <Calendar className="relative h-20 w-20 mx-auto text-green-400" />
+                      </div>
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Live Events</h3>
+                    <p className="text-gray-500">No events happening right now</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                    {events.filter(e => e.status === 'ongoing').map((event) => (
+                      <EventCard key={event.id} event={event} />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
 
-                {/* Coming Soon Animation */}
-                <div className="mt-8 flex items-center justify-center gap-2">
-                  <div className="h-3 w-3 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                  <div className="h-3 w-3 bg-cyan-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
-                  <div className="h-3 w-3 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
-                </div>
-              </CardContent>
-            </Card>
+              {/* Completed Events */}
+              <TabsContent value="completed" className="mt-6">
+                {events.filter(e => e.status === 'completed').length === 0 ? (
+                  <div className="text-center py-20 bg-gradient-to-br from-gray-50 to-slate-50 rounded-2xl border-2 border-dashed border-gray-200">
+                    <div className="relative inline-block mb-6">
+                      <div className="absolute inset-0 bg-gray-400 blur-2xl opacity-20"></div>
+                      <Calendar className="relative h-20 w-20 mx-auto text-gray-400" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Past Events</h3>
+                    <p className="text-gray-500">Completed events will appear here</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                    {events.filter(e => e.status === 'completed').map((event) => (
+                      <EventCard key={event.id} event={event} />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* All Events */}
+              <TabsContent value="all" className="mt-6">
+                {events.length === 0 ? (
+                  <div className="text-center py-20 bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl border-2 border-dashed border-purple-200">
+                    <div className="relative inline-block mb-6">
+                      <div className="absolute inset-0 bg-purple-400 blur-2xl opacity-20 animate-pulse"></div>
+                      <Calendar className="relative h-20 w-20 mx-auto text-purple-400" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Events Yet</h3>
+                    <p className="text-gray-500 mb-4">Be the first to know when events are posted!</p>
+                    <div className="flex items-center justify-center gap-2 text-purple-600">
+                      <Bell className="h-5 w-5" />
+                      <span className="text-sm font-semibold">Stay tuned for updates</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                    {events.map((event) => (
+                      <EventCard key={event.id} event={event} />
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 
-        {/* Full Profile Modal - Works for all tabs */}
+        {/* Full Profile Modal - Fully Responsive */}
         {showProfileModal && selectedProfile && (
           <div 
-            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3 sm:p-4"
             onClick={closeProfileView}
           >
             <div 
-              className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+              className="bg-white rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header with photo */}
-              <div className="relative h-80 bg-gradient-to-br from-pink-200 to-purple-200">
+              <div className="relative h-52 sm:h-64 md:h-80 bg-gradient-to-br from-pink-200 to-purple-200">
                 {selectedProfile.photo_url ? (
                   <img 
                     src={selectedProfile.photo_url} 
@@ -4434,20 +4762,20 @@ export default function App() {
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full">
-                    <User className="h-32 w-32 text-gray-400" />
+                    <User className="h-20 w-20 sm:h-24 sm:w-24 md:h-32 md:w-32 text-gray-400" />
                   </div>
                 )}
 
                 {/* Gradient overlay for text visibility */}
-                <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black/60 to-transparent"></div>
+                <div className="absolute bottom-0 left-0 right-0 h-24 sm:h-28 md:h-32 bg-gradient-to-t from-black/60 to-transparent"></div>
                 
                 {/* Name and basic info overlay */}
-                <div className="absolute bottom-6 left-6 right-6 text-white">
-                  <h1 className="text-4xl font-bold mb-2 drop-shadow-lg">
+                <div className="absolute bottom-3 sm:bottom-4 md:bottom-6 left-3 sm:left-4 md:left-6 right-3 sm:right-4 md:right-6 text-white">
+                  <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold mb-1 sm:mb-2 drop-shadow-lg leading-tight">
                     {selectedProfile.name}
                   </h1>
                   {selectedProfile.department && selectedProfile.year && (
-                    <p className="text-lg opacity-95 drop-shadow-md">
+                    <p className="text-xs sm:text-sm md:text-base lg:text-lg opacity-95 drop-shadow-md">
                       📚 {selectedProfile.department} • {selectedProfile.year} Year
                     </p>
                   )}
@@ -4455,31 +4783,31 @@ export default function App() {
               </div>
 
               {/* Content */}
-              <div className="p-6 space-y-6">
+              <div className="p-4 sm:p-5 md:p-6 space-y-4 sm:space-y-5 md:space-y-6">
                 {/* Bio */}
                 {selectedProfile.bio && (
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
-                      <span className="text-2xl">💭</span>
-                      About
+                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                      <span className="text-xl sm:text-2xl">💭</span>
+                      <span>About</span>
                     </h3>
-                    <p className="text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
+                    <p className="text-sm sm:text-base text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
                   </div>
                 )}
 
                 {/* Interests */}
                 {selectedProfile.interests && selectedProfile.interests.length > 0 && (
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-                      <span className="text-2xl">🎯</span>
-                      Interests
+                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 sm:mb-3 flex items-center gap-2">
+                      <span className="text-xl sm:text-2xl">🎯</span>
+                      <span>Interests</span>
                     </h3>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5 sm:gap-2">
                       {selectedProfile.interests.map((interest, idx) => (
                         <Badge 
                           key={idx} 
                           variant="secondary" 
-                          className="text-sm px-4 py-2"
+                          className="text-xs sm:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 md:py-2"
                         >
                           {interest}
                         </Badge>
@@ -4491,29 +4819,29 @@ export default function App() {
                 {/* Email */}
                 {selectedProfile.email && (
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
-                      <span className="text-2xl">📧</span>
-                      Contact
+                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                      <span className="text-xl sm:text-2xl">📧</span>
+                      <span>Contact</span>
                     </h3>
-                    <p className="text-gray-600">{selectedProfile.email}</p>
+                    <p className="text-xs sm:text-sm md:text-base text-gray-600 break-all">{selectedProfile.email}</p>
                   </div>
                 )}
 
                 {/* Action buttons */}
-                <div className="flex gap-3 pt-4 border-t">
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-3 sm:pt-4 border-t">
                   <Button
                     onClick={closeProfileView}
                     variant="outline"
-                    className="flex-1 border-2"
+                    className="w-full sm:flex-1 border-2 text-sm sm:text-base py-2 sm:py-2.5"
                   >
                     Close
                   </Button>
                   {likedProfiles.has(selectedProfile.id) ? (
                     <Button 
                       disabled
-                      className="flex-1 bg-gray-400 cursor-not-allowed"
+                      className="w-full sm:flex-1 bg-gray-400 cursor-not-allowed text-sm sm:text-base py-2 sm:py-2.5"
                     >
-                      <Heart className="h-5 w-5 mr-2 fill-white" />
+                      <Heart className="h-4 w-4 sm:h-5 sm:w-5 mr-2 fill-white" />
                       Request Sent
                     </Button>
                   ) : (
@@ -4522,13 +4850,179 @@ export default function App() {
                         await sendFriendRequest(selectedProfile.id)
                         closeProfileView()
                       }}
-                      className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-base py-6"
+                      className="w-full sm:flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-sm sm:text-base py-3 sm:py-4 md:py-6"
                     >
-                      <Heart className="h-5 w-5 mr-2" />
+                      <Heart className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                       Send Friend Request
                     </Button>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Event Details Modal */}
+        {/* Event Details Modal - Fully Responsive */}
+        {showEventDetails && selectedEvent && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-2xl md:max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+              {/* Header Image */}
+              <div className="relative h-40 sm:h-52 md:h-64 bg-gradient-to-br from-purple-400 to-pink-400">
+                {selectedEvent.image_url ? (
+                  <img
+                    src={selectedEvent.image_url}
+                    alt={selectedEvent.title}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <Calendar className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 text-white opacity-50" />
+                  </div>
+                )}
+                <button
+                  onClick={() => setShowEventDetails(false)}
+                  className="absolute top-2 right-2 sm:top-3 sm:right-3 md:top-4 md:right-4 bg-white/90 hover:bg-white text-gray-800 rounded-full p-1.5 sm:p-2 shadow-lg"
+                >
+                  <X className="h-5 w-5 sm:h-6 sm:w-6" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-4 sm:p-6 md:p-8">
+                <div className="flex flex-col sm:flex-row items-start sm:justify-between gap-2 sm:gap-4 mb-3 sm:mb-4">
+                  <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-800 leading-tight">{selectedEvent.title}</h2>
+                  <span className={`${getCategoryColor(selectedEvent.category)} text-white px-3 sm:px-4 py-1 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap flex-shrink-0`}>
+                    {selectedEvent.category}
+                  </span>
+                </div>
+
+                <p className="text-gray-600 mb-4 sm:mb-6 text-sm sm:text-base md:text-lg leading-relaxed">
+                  {selectedEvent.description}
+                </p>
+
+                {/* Details Grid */}
+                <div className="grid sm:grid-cols-2 gap-3 sm:gap-4 md:gap-6 mb-4 sm:mb-6">
+                  <div className="space-y-3 sm:space-y-4">
+                    <div className="flex items-center">
+                      <div className="bg-blue-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                        <Calendar className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm text-gray-500">Date</p>
+                        <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base leading-tight">
+                          {new Date(selectedEvent.event_date).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center">
+                      <div className="bg-purple-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                        <Clock className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-purple-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm text-gray-500">Time</p>
+                        <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base">{selectedEvent.event_time}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center">
+                      <div className="bg-red-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                        <MapPin className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-red-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm text-gray-500">Venue</p>
+                        <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base break-words">{selectedEvent.venue}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 sm:space-y-4">
+                    {selectedEvent.club_name && (
+                      <div className="flex items-center">
+                        <div className="bg-indigo-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                          <Users className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-indigo-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-gray-500">Club / Organization</p>
+                          <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base break-words">{selectedEvent.club_name}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedEvent.organizer && (
+                      <div className="flex items-center">
+                        <div className="bg-green-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                          <Users className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-green-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-gray-500">Organized By</p>
+                          <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base break-words">{selectedEvent.organizer}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedEvent.max_capacity && (
+                      <div className="flex items-center">
+                        <div className="bg-yellow-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                          <Users className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-yellow-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-gray-500">Capacity</p>
+                          <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base">{selectedEvent.max_capacity} people</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedEvent.contact_email && (
+                      <div className="flex items-center">
+                        <div className="bg-blue-100 p-2 sm:p-2.5 md:p-3 rounded-lg mr-3 sm:mr-4 flex-shrink-0">
+                          <Mail className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-blue-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm text-gray-500">Contact</p>
+                          <p className="font-semibold text-gray-800 text-[10px] sm:text-xs md:text-sm break-all">{selectedEvent.contact_email}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Chief Guests */}
+                {selectedEvent.guests && (
+                  <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-purple-50 rounded-lg">
+                    <h3 className="font-semibold text-gray-800 mb-2 flex items-center text-sm sm:text-base">
+                      <Star className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-purple-600 flex-shrink-0" />
+                      Chief Guests
+                    </h3>
+                    <p className="text-gray-700 text-xs sm:text-sm md:text-base">{selectedEvent.guests}</p>
+                  </div>
+                )}
+
+                {/* Registration */}
+                {selectedEvent.registration_required && selectedEvent.registration_link && (
+                  <div className="mt-4 sm:mt-6">
+                    <a
+                      href={selectedEvent.registration_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full bg-gradient-to-r from-blue-500 to-purple-500 text-white text-center py-3 sm:py-3.5 md:py-4 px-4 sm:px-6 rounded-lg sm:rounded-xl font-bold text-sm sm:text-base md:text-lg hover:from-blue-600 hover:to-purple-600 transition-all shadow-lg hover:shadow-xl active:scale-95"
+                    >
+                      Register for this Event →
+                    </a>
+                  </div>
+                )}
+
+                {selectedEvent.contact_phone && (
+                  <p className="text-center text-gray-500 text-xs sm:text-sm mt-3 sm:mt-4">
+                    For queries, call: {selectedEvent.contact_phone}
+                  </p>
+                )}
               </div>
             </div>
           </div>

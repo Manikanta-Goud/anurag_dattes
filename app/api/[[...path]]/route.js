@@ -1780,11 +1780,156 @@ async function handleRemoveFriend(request) {
   }
 }
 
+// Event Management Routes
+async function handleGetEvents(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const status = searchParams.get('status') || 'upcoming'
+
+    let query = supabase
+      .from('events')
+      .select('*')
+      .order('event_date', { ascending: true })
+
+    if (status !== 'all') {
+      query = query.eq('status', status)
+    }
+
+    const { data, error } = await query
+
+    if (error) throw error
+
+    return NextResponse.json({ events: data || [] })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleCreateEvent(request) {
+  try {
+    const body = await request.json()
+    const {
+      title,
+      description,
+      event_date,
+      event_time,
+      venue,
+      club_name,
+      organizer,
+      guests,
+      category,
+      image_url,
+      max_capacity,
+      registration_required,
+      registration_link,
+      contact_email,
+      contact_phone,
+      created_by
+    } = body
+
+    const { data, error } = await supabase
+      .from('events')
+      .insert({
+        title,
+        description,
+        event_date,
+        event_time,
+        venue,
+        club_name,
+        organizer,
+        guests,
+        category,
+        image_url,
+        max_capacity,
+        registration_required,
+        registration_link,
+        contact_email,
+        contact_phone,
+        created_by,
+        status: 'upcoming'
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      message: 'Event created successfully',
+      event: data
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleUpdateEvent(request) {
+  try {
+    const body = await request.json()
+    const { eventId, ...updates } = body
+
+    const { data, error } = await supabase
+      .from('events')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', eventId)
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      message: 'Event updated successfully',
+      event: data
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleDeleteEvent(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const eventId = searchParams.get('eventId')
+
+    const { error } = await supabase
+      .from('events')
+      .delete()
+      .eq('id', eventId)
+
+    if (error) throw error
+
+    return NextResponse.json({
+      success: true,
+      message: 'Event deleted successfully'
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
 
-  if (pathname.includes('/api/profiles')) {
+  if (pathname.includes('/api/events')) {
+    return handleGetEvents(request)
+  } else if (pathname.includes('/api/profiles')) {
     return handleGetProfiles(request)
   } else if (pathname.includes('/api/matches')) {
     return handleGetMatches(request)
@@ -1822,7 +1967,11 @@ export async function GET(request) {
 export async function POST(request) {
   const pathname = new URL(request.url).pathname
 
-  if (pathname.includes('/api/auth/signup')) {
+  if (pathname.includes('/api/events/create')) {
+    return handleCreateEvent(request)
+  } else if (pathname.includes('/api/events/update')) {
+    return handleUpdateEvent(request)
+  } else if (pathname.includes('/api/auth/signup')) {
     return handleSignup(request)
   } else if (pathname.includes('/api/auth/login')) {
     return handleLogin(request)
@@ -1864,6 +2013,16 @@ export async function POST(request) {
     return handleDecrementLike(request)
   } else if (pathname.includes('/api/increment-view')) {
     return handleIncrementView(request)
+  }
+
+  return NextResponse.json({ error: 'Not found' }, { status: 404 })
+}
+
+export async function DELETE(request) {
+  const pathname = new URL(request.url).pathname
+
+  if (pathname.includes('/api/events/delete')) {
+    return handleDeleteEvent(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
