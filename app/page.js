@@ -649,6 +649,17 @@ export default function App() {
           const liked = new Set(likesData.likes?.map(l => l.toUserId) || [])
           setLikedProfiles(liked)
         }
+        
+        // Also load sent friend requests to mark those profiles as "Request Sent"
+        const sentRequestsResponse = await fetch(`/api/friend-request/sent?userId=${userId}`)
+        const sentRequestsData = await sentRequestsResponse.json()
+        if (sentRequestsResponse.ok && sentRequestsData.length > 0) {
+          console.log('📤 User has sent', sentRequestsData.length, 'pending friend requests')
+          // Add sent request receiver IDs to likedProfiles
+          sentRequestsData.forEach(req => {
+            setLikedProfiles(prev => new Set(prev).add(req.receiver_id))
+          })
+        }
       }
     } catch (error) {
       console.error('Failed to load profiles:', error)
@@ -815,13 +826,17 @@ export default function App() {
 
   const loadFriendRequests = async (userId) => {
     try {
+      console.log('📥 Loading friend requests for user:', userId)
       const response = await fetch(`/api/friend-request/pending?userId=${userId}`)
       const data = await response.json()
       if (response.ok) {
+        console.log('✅ Loaded', data?.length || 0, 'incoming friend requests')
         setFriendRequests(data || [])
+      } else {
+        console.error('❌ Failed to load friend requests:', data.error)
       }
     } catch (error) {
-      console.error('Failed to load friend requests:', error)
+      console.error('❌ Failed to load friend requests:', error)
     }
   }
 
@@ -892,6 +907,7 @@ export default function App() {
 
   const sendFriendRequest = async (receiverId) => {
     try {
+      console.log('📤 Sending friend request from', currentUser.id, 'to', receiverId)
       const response = await fetch('/api/friend-request/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -902,16 +918,22 @@ export default function App() {
       })
 
       const data = await response.json()
+      console.log('📬 Friend request response:', data)
+      console.log('📊 Response status:', response.status, response.statusText)
 
       if (response.ok) {
-        toast.success('Friend request sent!')
-        // Optionally add to liked profiles to show "Request Sent"
+        console.log('✅ Friend request sent successfully')
+        toast.success('Friend request sent! Wait for them to accept.')
+        // Add to liked profiles to show "Request Sent"
         setLikedProfiles(prev => new Set(prev).add(receiverId))
       } else {
-        toast.error(data.error || 'Failed to send request')
+        console.error('❌ Failed to send friend request. Status:', response.status)
+        console.error('❌ Error details:', data)
+        toast.error(data.error || 'Failed to send request. Check console for details.')
       }
     } catch (error) {
-      toast.error('Failed to send friend request')
+      console.error('❌ Error sending friend request:', error)
+      toast.error('Failed to send friend request: ' + error.message)
     }
   }
 

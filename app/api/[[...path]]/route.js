@@ -1174,8 +1174,24 @@ async function handleSendFriendRequest(request) {
   try {
     const { senderId, receiverId } = await request.json()
 
-    // Check if already sent
-    const { data: existing } = await supabase
+    console.log('📤 Friend request: User', senderId, '→ User', receiverId)
+
+    // Check if already matched
+    const { data: existingMatch } = await supabase
+      .from('matches')
+      .select('id')
+      .or(`and(user1Id.eq.${senderId},user2Id.eq.${receiverId}),and(user1Id.eq.${receiverId},user2Id.eq.${senderId})`)
+      .single()
+
+    if (existingMatch) {
+      return NextResponse.json(
+        { error: 'You are already friends' },
+        { status: 400 }
+      )
+    }
+
+    // Check if already sent (prevent duplicates)
+    const { data: existingSent } = await supabase
       .from('friend_requests')
       .select('*')
       .eq('sender_id', senderId)
@@ -1183,7 +1199,7 @@ async function handleSendFriendRequest(request) {
       .eq('status', 'pending')
       .single()
 
-    if (existing) {
+    if (existingSent) {
       return NextResponse.json(
         { error: 'Friend request already sent' },
         { status: 400 }
@@ -1204,7 +1220,8 @@ async function handleSendFriendRequest(request) {
       )
     }
 
-    // Insert friend request
+    // Create a normal pending request (Instagram style - NO auto-matching)
+    // User B must manually accept the request from notification bar
     const { data, error } = await supabase
       .from('friend_requests')
       .insert({
@@ -1217,11 +1234,47 @@ async function handleSendFriendRequest(request) {
 
     if (error) throw error
 
+    console.log('✅ Friend request sent successfully')
+
     return NextResponse.json({
       success: true,
+      matched: false,
       request: data
     })
   } catch (error) {
+    console.error('❌ Send friend request error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleGetSentRequests(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    console.log('📤 Loading sent friend requests for userId:', userId)
+
+    // Get outgoing friend requests (sent by this user)
+    const { data: sentRequests, error } = await supabase
+      .from('friend_requests')
+      .select('*')
+      .eq('sender_id', userId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('❌ Error loading sent requests:', error)
+      throw error
+    }
+
+    console.log('✅ Found', sentRequests?.length || 0, 'sent friend requests')
+
+    return NextResponse.json(sentRequests || [])
+  } catch (error) {
+    console.error('❌ Get sent requests error:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
@@ -1951,6 +2004,8 @@ export async function GET(request) {
     return handleCheckBanStatus(request)
   } else if (pathname.includes('/api/warnings')) {
     return handleGetWarnings(request)
+  } else if (pathname.includes('/api/friend-request/sent')) {
+    return handleGetSentRequests(request)
   } else if (pathname.includes('/api/friend-request/pending')) {
     return handleGetPendingRequests(request)
   } else if (pathname.includes('/api/blocked-users')) {
