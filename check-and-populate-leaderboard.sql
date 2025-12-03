@@ -45,11 +45,35 @@ END $$;
 
 -- STEP 5: Populate leaderboard with actual data
 -- Count friend requests + matches for each user
+
+-- Total likes (all time)
 UPDATE profiles p
 SET total_likes = (
     SELECT COALESCE(
         (SELECT COUNT(*) FROM friend_requests WHERE receiver_id = p.id) +
         (SELECT COUNT(*) FROM matches WHERE user1id = p.id OR user2id = p.id),
+        0
+    )
+);
+
+-- Daily likes (friend requests received today)
+UPDATE profiles p
+SET daily_likes = (
+    SELECT COALESCE(
+        (SELECT COUNT(*) FROM friend_requests 
+         WHERE receiver_id = p.id 
+         AND created_at >= CURRENT_DATE),
+        0
+    )
+);
+
+-- Weekly likes (friend requests received in last 7 days)
+UPDATE profiles p
+SET weekly_likes = (
+    SELECT COALESCE(
+        (SELECT COUNT(*) FROM friend_requests 
+         WHERE receiver_id = p.id 
+         AND created_at >= CURRENT_DATE - INTERVAL '7 days'),
         0
     )
 );
