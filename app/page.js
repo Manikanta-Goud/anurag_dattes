@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 
@@ -88,9 +89,12 @@ export default function App() {
   const [profileForm, setProfileForm] = useState({
     name: '',
     bio: '',
-    department: '',
-    year: '',
+    age: 18,
+    gender: 'prefer_not_to_say',
+    location: '',
+    instagram: '',
     interests: '',
+    hobbies: '',
     photo_url: ''
   })
 
@@ -144,20 +148,31 @@ export default function App() {
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
-          table: 'messages',
-          filter: `matchId=eq.${matchId}`
+          table: 'messages'
         }, (payload) => {
           console.log('⚡ REALTIME MESSAGE RECEIVED:', payload.new)
           console.log('📌 Current match ID ref:', currentMatchIdRef.current)
-          console.log('📌 Message match ID:', payload.new.matchId)
           
-          // New message arrives - add it instantly!
+          // New message arrives - check if it's for this match
           const newMessage = payload.new
           
-          // CRITICAL: Only add message if it belongs to the CURRENT selected match
-          // Use ref instead of closure to get the LATEST match ID
-          if (newMessage.matchId !== currentMatchIdRef.current) {
-            console.log('⚠️ Message belongs to different match, IGNORING. Expected:', currentMatchIdRef.current, 'Got:', newMessage.matchId)
+          // Since messages table doesn't have match_id, we need to check if this message
+          // is between the users in our current match
+          if (!selectedMatch) {
+            console.log('⚠️ No match selected, ignoring message')
+            return
+          }
+          
+          const currentUserId = currentUser.id
+          const otherUserId = selectedMatch.matchedUser?.id
+          
+          // Check if message is between current user and matched user
+          const isForThisMatch = 
+            (newMessage.sender_id === currentUserId && newMessage.receiver_id === otherUserId) ||
+            (newMessage.sender_id === otherUserId && newMessage.receiver_id === currentUserId)
+          
+          if (!isForThisMatch) {
+            console.log('⚠️ Message not for this match, ignoring')
             return
           }
           
@@ -366,6 +381,12 @@ export default function App() {
         }, async (payload) => {
           console.log('⚡ NEW FRIEND REQUEST RECEIVED:', payload.new)
           
+          // Only show if status is pending
+          if (payload.new.status !== 'pending') {
+            console.log('⚠️ Skipping non-pending request')
+            return
+          }
+          
           // Fetch the sender's profile data
           try {
             const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
@@ -409,6 +430,20 @@ export default function App() {
             console.error('Failed to fetch sender profile:', error)
             // Fallback: reload all friend requests
             loadFriendRequests(currentUser.id)
+          }
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'friend_requests',
+          filter: `receiver_id=eq.${currentUser.id}`
+        }, (payload) => {
+          console.log('⚡ FRIEND REQUEST UPDATED:', payload.new)
+          
+          // If status changed to accepted or rejected, remove from notifications
+          if (payload.new.status === 'accepted' || payload.new.status === 'rejected') {
+            setFriendRequests(prev => prev.filter(req => req.id !== payload.new.id))
+            console.log('✅ Removed request from notifications (status:', payload.new.status + ')')
           }
         })
         .subscribe((status) => {
@@ -545,8 +580,10 @@ export default function App() {
           setProfileForm({ ...profileForm, name: authForm.name })
           setView('profile-setup')
         } else {
-          if (data.error?.includes('already exists') || data.error?.includes('duplicate')) {
+          if (data.error?.includes('already exists') || data.error?.includes('duplicate') || data.error?.includes('already registered')) {
             toast.error('⚠️ This email is already registered! Please login instead.', { duration: 5000 })
+          } else if (data.error?.includes('security purposes') || data.error?.includes('rate limit')) {
+            toast.error('⏳ Please wait a moment before trying again (rate limit protection)', { duration: 6000 })
           } else {
             toast.error(data.error || 'Signup failed')
           }
@@ -561,6 +598,8 @@ export default function App() {
         const data = await response.json()
 
         if (response.ok) {
+          console.log('✅ Login successful! User data:', data.user)
+          console.log('📋 Full profile:', JSON.stringify(data.user, null, 2))
           toast.success('Welcome back!')
           setCurrentUser(data.user)
           localStorage.setItem('currentUser', JSON.stringify(data.user))
@@ -589,42 +628,57 @@ export default function App() {
 
     try {
       // Upload photo if it's a base64 preview
-      let finalPhotoUrl = profileForm.photo_url
+      let profilePictureUrl = ''
       if (profileForm.photo_url && !profileForm.photo_url.startsWith('http')) {
         toast.loading('Uploading photo...', { id: 'setup-photo' })
-        finalPhotoUrl = await uploadPhotoToServer(profileForm.photo_url)
-        if (!finalPhotoUrl) {
+        const uploadedUrl = await uploadPhotoToServer(profileForm.photo_url)
+        if (!uploadedUrl) {
           setLoading(false)
           toast.error('Failed to upload photo. Please try again.', { id: 'setup-photo' })
           return
         }
+        profilePictureUrl = uploadedUrl
         toast.success('Photo uploaded!', { id: 'setup-photo' })
+      } else if (profileForm.photo_url) {
+        profilePictureUrl = profileForm.photo_url
       }
 
-      const interestsArray = profileForm.interests.split(',').map(i => i.trim()).filter(i => i)
+      // Parse interests and hobbies
+      const interestsArray = profileForm.interests 
+        ? profileForm.interests.split(',').map(i => i.trim()).filter(i => i)
+        : []
+      const hobbiesArray = profileForm.hobbies 
+        ? profileForm.hobbies.split(',').map(i => i.trim()).filter(i => i)
+        : []
       
-      toast.loading('Creating profile...', { id: 'setup-profile' })
+      toast.loading('Updating profile...', { id: 'setup-profile' })
       const response = await fetch('/api/profiles', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUser.id,
-          ...profileForm,
-          photo_url: finalPhotoUrl,
-          interests: interestsArray
+          name: profileForm.name,
+          bio: profileForm.bio || '',
+          age: parseInt(profileForm.age) || 18,
+          gender: profileForm.gender || 'prefer_not_to_say',
+          location: profileForm.location || '',
+          instagram: profileForm.instagram || '',
+          interests: interestsArray,
+          hobbies: hobbiesArray,
+          profile_picture: profilePictureUrl
         })
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        toast.success('Profile created successfully!', { id: 'setup-profile' })
+        toast.success('Profile updated successfully!', { id: 'setup-profile' })
         setCurrentUser({ ...currentUser, ...data.profile })
         localStorage.setItem('currentUser', JSON.stringify({ ...currentUser, ...data.profile }))
         setView('main')
         loadProfiles(currentUser.id)
       } else {
-        toast.error(data.error || 'Failed to create profile', { id: 'setup-profile' })
+        toast.error(data.error || 'Failed to update profile', { id: 'setup-profile' })
       }
     } catch (error) {
       toast.error('Something went wrong!')
@@ -905,9 +959,24 @@ export default function App() {
     return null
   }
 
+  // ⚡ OPTIMIZED: Debounce map to prevent duplicate requests
+  const sendingRequestsRef = useRef(new Set())
+  const [sendingRequest, setSendingRequest] = useState(false)
+
   const sendFriendRequest = async (receiverId) => {
+    // ⚡ Prevent duplicate requests (debouncing)
+    if (sendingRequestsRef.current.has(receiverId)) {
+      return // Already sending to this user
+    }
+
     try {
-      console.log('📤 Sending friend request from', currentUser.id, 'to', receiverId)
+      // ⚡ OPTIMISTIC UI UPDATE - Update UI immediately for instant feedback
+      sendingRequestsRef.current.add(receiverId)
+      setSendingRequest(true)
+      setLikedProfiles(prev => new Set(prev).add(receiverId))
+      toast.success('Friend request sent! 🚀', { duration: 2000 })
+
+      // ⚡ Send request in background (non-blocking)
       const response = await fetch('/api/friend-request/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -917,23 +986,30 @@ export default function App() {
         })
       })
 
-      const data = await response.json()
-      console.log('📬 Friend request response:', data)
-      console.log('📊 Response status:', response.status, response.statusText)
-
-      if (response.ok) {
-        console.log('✅ Friend request sent successfully')
-        toast.success('Friend request sent! Wait for them to accept.')
-        // Add to liked profiles to show "Request Sent"
-        setLikedProfiles(prev => new Set(prev).add(receiverId))
-      } else {
-        console.error('❌ Failed to send friend request. Status:', response.status)
-        console.error('❌ Error details:', data)
-        toast.error(data.error || 'Failed to send request. Check console for details.')
+      if (!response.ok) {
+        // ⚡ Rollback optimistic update on error
+        const data = await response.json()
+        setLikedProfiles(prev => {
+          const updated = new Set(prev)
+          updated.delete(receiverId)
+          return updated
+        })
+        toast.error(data.error || 'Failed to send request')
       }
     } catch (error) {
-      console.error('❌ Error sending friend request:', error)
-      toast.error('Failed to send friend request: ' + error.message)
+      // ⚡ Rollback on network error
+      setLikedProfiles(prev => {
+        const updated = new Set(prev)
+        updated.delete(receiverId)
+        return updated
+      })
+      toast.error('Network error. Please try again.')
+    } finally {
+      setSendingRequest(false)
+      // ⚡ Clear debounce after 1 second
+      setTimeout(() => {
+        sendingRequestsRef.current.delete(receiverId)
+      }, 1000)
     }
   }
 
@@ -1096,6 +1172,17 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
+        // Check if it was an unlike action
+        if (data.unliked) {
+          toast.success('💔 Unliked! You can send a friend request again.')
+          // Remove from liked profiles set
+          const newLikedProfiles = new Set(likedProfiles)
+          newLikedProfiles.delete(profileId)
+          setLikedProfiles(newLikedProfiles)
+          return
+        }
+
+        // It was a like action
         // Increment like count for leaderboard
         try {
           const likeResponse = await fetch('/api/increment-like', {
@@ -1323,6 +1410,10 @@ export default function App() {
         userId: currentUser.id,
         name: profileForm.name,
         bio: profileForm.bio,
+        age: profileForm.age,
+        gender: profileForm.gender,
+        location: profileForm.location,
+        instagram: profileForm.instagram,
         department: profileForm.department,
         year: profileForm.year,
         photo_url: finalPhotoUrl,
@@ -1353,6 +1444,10 @@ export default function App() {
         setProfileForm({
           name: updatedUser.name || '',
           bio: updatedUser.bio || '',
+          age: updatedUser.age || '',
+          gender: updatedUser.gender || '',
+          location: updatedUser.location || '',
+          instagram: updatedUser.instagram || '',
           department: updatedUser.department || '',
           year: updatedUser.year || '',
           interests: updatedUser.interests ? updatedUser.interests.join(', ') : '',
@@ -1382,6 +1477,10 @@ export default function App() {
     setProfileForm({
       name: currentUser.name || '',
       bio: currentUser.bio || '',
+      age: currentUser.age || '',
+      gender: currentUser.gender || '',
+      location: currentUser.location || '',
+      instagram: currentUser.instagram || '',
       department: currentUser.department || '',
       year: currentUser.year || '',
       interests: currentUser.interests ? currentUser.interests.join(', ') : '',
@@ -1861,23 +1960,44 @@ export default function App() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Department</label>
+                  <label className="text-sm font-medium mb-2 block">Age</label>
                   <Input
-                    type="text"
-                    placeholder="e.g., CSE, ECE, ME"
-                    value={profileForm.department}
-                    onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })}
+                    type="number"
+                    placeholder="e.g., 18, 19, 20"
+                    value={profileForm.age}
+                    onChange={(e) => setProfileForm({ ...profileForm, age: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Year</label>
-                  <Input
-                    type="text"
-                    placeholder="e.g., 1st, 2nd, 3rd, 4th"
-                    value={profileForm.year}
-                    onChange={(e) => setProfileForm({ ...profileForm, year: e.target.value })}
-                  />
+                  <label className="text-sm font-medium mb-2 block">Gender</label>
+                  <select
+                    value={profileForm.gender}
+                    onChange={(e) => setProfileForm({ ...profileForm, gender: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-md"
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="prefer_not_to_say">Prefer not to say</option>
+                  </select>
                 </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Location</label>
+                <Input
+                  type="text"
+                  placeholder="e.g., Hyderabad, Bangalore"
+                  value={profileForm.location}
+                  onChange={(e) => setProfileForm({ ...profileForm, location: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Instagram (optional)</label>
+                <Input
+                  type="text"
+                  placeholder="@username"
+                  value={profileForm.instagram}
+                  onChange={(e) => setProfileForm({ ...profileForm, instagram: e.target.value })}
+                />
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">Interests (comma separated)</label>
@@ -1886,6 +2006,15 @@ export default function App() {
                   placeholder="e.g., Music, Sports, Coding, Reading"
                   value={profileForm.interests}
                   onChange={(e) => setProfileForm({ ...profileForm, interests: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-2 block">Hobbies (comma separated)</label>
+                <Input
+                  type="text"
+                  placeholder="e.g., Gaming, Photography, Dancing"
+                  value={profileForm.hobbies}
+                  onChange={(e) => setProfileForm({ ...profileForm, hobbies: e.target.value })}
                 />
               </div>
               <div>
@@ -2102,6 +2231,27 @@ export default function App() {
                         <p className="text-lg">{currentUser?.bio || 'Not provided'}</p>
                       </div>
 
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-medium text-gray-500">Age</label>
+                          <p className="text-lg">{currentUser?.age || 'Not provided'}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-500">Gender</label>
+                          <p className="text-lg">{currentUser?.gender || 'Not provided'}</p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-gray-500">Location</label>
+                        <p className="text-lg">{currentUser?.location || 'Not provided'}</p>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-gray-500">Instagram</label>
+                        <p className="text-lg">{currentUser?.instagram ? `@${currentUser.instagram}` : 'Not provided'}</p>
+                      </div>
+
                       <div>
                         <label className="text-sm font-medium text-gray-500">Interests</label>
                         {currentUser?.interests && currentUser.interests.length > 0 ? (
@@ -2158,6 +2308,51 @@ export default function App() {
                           onChange={(e) => setProfileForm({ ...profileForm, year: e.target.value })}
                         />
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium mb-2 block">Age</label>
+                        <Input
+                          type="number"
+                          placeholder="e.g., 20"
+                          value={profileForm.age}
+                          onChange={(e) => setProfileForm({ ...profileForm, age: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium mb-2 block">Gender</label>
+                        <Select
+                          value={profileForm.gender}
+                          onValueChange={(value) => setProfileForm({ ...profileForm, gender: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select gender" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Male">Male</SelectItem>
+                            <SelectItem value="Female">Female</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Location</label>
+                      <Input
+                        type="text"
+                        placeholder="e.g., Hyderabad, Telangana"
+                        value={profileForm.location}
+                        onChange={(e) => setProfileForm({ ...profileForm, location: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Instagram (optional)</label>
+                      <Input
+                        type="text"
+                        placeholder="e.g., your_username"
+                        value={profileForm.instagram}
+                        onChange={(e) => setProfileForm({ ...profileForm, instagram: e.target.value })}
+                      />
                     </div>
                     <div>
                       <label className="text-sm font-medium mb-2 block">Interests (comma separated)</label>
@@ -2910,11 +3105,11 @@ export default function App() {
                 >
                   <Home className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'home' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Home</span>
-                  {(unreadMessages.size > 0 || blockedUsersList.length > 0) && (
+                  {unreadMessages.size > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-5 w-5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 border-2 border-white items-center justify-center">
-                        <span className="text-white text-[10px] font-bold">{unreadMessages.size + blockedUsersList.length}</span>
+                        <span className="text-white text-[10px] font-bold">{unreadMessages.size}</span>
                       </span>
                     </span>
                   )}
@@ -2989,11 +3184,6 @@ export default function App() {
                 className="relative data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-gray-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 Blocked
-                {blockedUsersList.length > 0 && (
-                  <span className="absolute -top-1 -right-1 h-6 w-6 bg-gray-600 text-white text-xs font-bold rounded-full flex items-center justify-center z-10 border-2 border-white shadow-lg">
-                    {blockedUsersList.length}
-                  </span>
-                )}
               </TabsTrigger>
             </TabsList>
 
@@ -3042,11 +3232,6 @@ export default function App() {
                   className="relative flex-1 max-w-[170px] rounded-full shadow-lg bg-gradient-to-br from-gray-50 to-slate-50 data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-gray-300/50 border-2 border-gray-200 data-[state=active]:border-gray-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   Blocked
-                  {blockedUsersList.length > 0 && (
-                    <span className="absolute -top-1 -right-1 h-5 w-5 bg-gray-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center z-10 border-2 border-white shadow-lg">
-                      {blockedUsersList.length}
-                    </span>
-                  )}
                 </TabsTrigger>
               </div>
             </TabsList>

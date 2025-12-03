@@ -1748,14 +1748,19 @@ export default function AdminPanel() {
                         ? { ...eventForm, eventId: editingEvent.id }
                         : eventForm
 
+                      console.log('Creating event with data:', body)
+
                       const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(body)
                       })
 
+                      console.log('Response status:', response.status)
+                      const data = await response.json()
+                      console.log('Response data:', data)
+
                       if (response.ok) {
-                        const data = await response.json()
                         if (editingEvent) {
                           setEvents(events.map(e => e.id === editingEvent.id ? data.event : e))
                           alert('Event updated successfully!')
@@ -1766,11 +1771,11 @@ export default function AdminPanel() {
                         setShowEventModal(false)
                         setEditingEvent(null)
                       } else {
-                        alert('Failed to save event')
+                        alert('Failed to save event: ' + (data.error || 'Unknown error'))
                       }
                     } catch (error) {
                       console.error('Error saving event:', error)
-                      alert('Error saving event')
+                      alert('Error saving event: ' + error.message)
                     } finally {
                       setSavingEvent(false)
                     }

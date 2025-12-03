@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '../../../lib/supabase'
+import { supabase, supabaseAdmin } from '../../../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
 // In-memory store for online users (in production, use Redis)
@@ -41,8 +41,6 @@ async function handleSignup(request) {
       }
 
       const idPart = email.split('@')[0]
-      // Format: YYegDDDSRR (e.g., 23eg105j13, 23eg305j13, 24eg206a05)
-      // DDD can be any 3-digit number (105, 206, 305, 449, 505, etc.)
       const collegeIdPattern = /^(\d{2})(eg)(\d{3})([a-z])(\d{2})$/i
 
       if (!collegeIdPattern.test(idPart)) {
@@ -63,50 +61,85 @@ async function handleSignup(request) {
       )
     }
 
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('profiles')
-      .select('id, email')
-      .eq('email', email)
-      .single()
+    // Create user with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name
+        }
+      }
+    })
 
-    if (existingUser) {
-      return NextResponse.json(
-        { error: 'This email is already registered! Please login instead.' },
-        { status: 400 }
-      )
-    }
-
-    // Create user
-    const userId = uuidv4()
-    const { data, error } = await supabase
-      .from('profiles')
-      .insert([{
-        id: userId,
-        email,
-        password: hashPassword(password),
-        name,
-        createdAt: new Date().toISOString()
-      }])
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Signup error:', error)
-      if (error.code === '23505') { // Unique constraint violation
+    if (authError) {
+      console.error('Auth signup error:', authError)
+      if (authError.message.includes('already registered')) {
         return NextResponse.json(
           { error: 'This email is already registered! Please login instead.' },
           { status: 400 }
         )
       }
       return NextResponse.json(
-        { error: 'Failed to create account' },
+        { error: authError.message || 'Failed to create account' },
         { status: 500 }
       )
     }
 
-    const { password: _, ...userWithoutPassword } = data
-    return NextResponse.json({ user: userWithoutPassword })
+    // Extract roll number from email
+    const rollNumber = email.split('@')[0]
+    
+    // Extract branch from roll number
+    const branchMatch = rollNumber.match(/\d{2}([a-z]{2})\d{3}/i)
+    const branch = branchMatch ? branchMatch[1].toUpperCase() : 'UNKNOWN'
+    
+    // Extract year from roll number
+    const yearPrefix = parseInt(rollNumber.substring(0, 2))
+    const currentYear = new Date().getFullYear() % 100
+    const yearDiff = currentYear - yearPrefix
+    const academicYear = yearDiff >= 0 && yearDiff <= 4 ? yearDiff + 1 : 1
+
+    // Create profile entry
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert([{
+        id: authData.user.id,
+        auth_id: authData.user.id,
+        email,
+        name,
+        roll_number: rollNumber,
+        branch: branch,
+        year: academicYear,
+        gender: 'Other',
+        age: 18,
+        is_verified: false,
+        is_active: true
+      }])
+      .select()
+      .single()
+
+    if (profileError) {
+      console.error('Profile creation error:', profileError)
+      return NextResponse.json(
+        { error: `Failed to create profile: ${profileError.message}` },
+        { status: 500 }
+      )
+    }
+
+    // Map profile_picture to photo_url for frontend compatibility
+    const profileWithPhotoUrl = {
+      ...profile,
+      photo_url: profile.profile_picture,
+      department: profile.branch
+    }
+
+    console.log('✅ Signup successful! Returning profile:', profileWithPhotoUrl.email)
+
+    return NextResponse.json({ 
+      user: profileWithPhotoUrl,
+      profile: profileWithPhotoUrl,
+      authUser: authData.user
+    })
   } catch (error) {
     console.error('Signup error:', error)
     return NextResponse.json(
@@ -129,34 +162,50 @@ async function handleLogin(request) {
       )
     }
 
-    // Find user
-    const { data: user, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('email', email)
-      .single()
+    // Authenticate with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
 
-    if (error || !user) {
+    if (authError) {
+      console.error('Auth login error:', authError)
+      if (authError.message.includes('Invalid login credentials')) {
+        return NextResponse.json(
+          { error: 'Invalid email or password' },
+          { status: 401 }
+        )
+      }
       return NextResponse.json(
         { error: 'Account not found! Please signup first.' },
         { status: 401 }
       )
     }
 
-    // Verify password
-    if (!verifyPassword(password, user.password)) {
+    console.log('🔍 Looking for profile with email:', email)
+
+    // Get user profile by email
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .single()
+
+    console.log('Profile query result:', { profile: profile?.id, profileError })
+
+    if (profileError || !profile) {
+      console.error('❌ Profile not found for email:', email)
       return NextResponse.json(
-        { error: 'Invalid email or password' },
-        { status: 401 }
+        { error: 'Profile not found. Please contact support.' },
+        { status: 404 }
       )
     }
 
     // Check if user is banned
-    const { data: ban } = await supabase
+    const { data: ban } = await supabaseAdmin
       .from('banned_users')
       .select('*')
-      .eq('userid', user.id)
-      .eq('isactive', true)
+      .eq('user_id', authData.user.id)
       .single()
 
     if (ban) {
@@ -165,14 +214,35 @@ async function handleLogin(request) {
           error: 'Your account has been banned',
           banned: true,
           reason: ban.reason,
-          bannedAt: ban.bannedat
+          bannedAt: ban.created_at
         },
         { status: 403 }
       )
     }
 
-    const { password: _, ...userWithoutPassword } = user
-    return NextResponse.json({ user: userWithoutPassword })
+    // Map profile_picture to photo_url and branch to department
+    const profileWithMappedFields = {
+      ...profile,
+      photo_url: profile.profile_picture,
+      department: profile.branch
+    }
+
+    console.log('✅ Login successful! Returning profile:', profileWithMappedFields.email)
+    console.log('📋 Profile fields:', {
+      name: profileWithMappedFields.name,
+      branch: profileWithMappedFields.branch,
+      department: profileWithMappedFields.department,
+      year: profileWithMappedFields.year,
+      bio: profileWithMappedFields.bio,
+      age: profileWithMappedFields.age,
+      gender: profileWithMappedFields.gender
+    })
+
+    return NextResponse.json({ 
+      user: profileWithMappedFields,
+      profile: profileWithMappedFields,
+      session: authData.session
+    })
   } catch (error) {
     console.error('Login error:', error)
     return NextResponse.json(
@@ -200,9 +270,9 @@ async function handleGetProfiles(request) {
     // Get all profiles except current user
     const { data: profiles, error } = await supabase
       .from('profiles')
-      .select('id, name, bio, department, year, interests, photo_url, email, createdAt')
+      .select('id, name, bio, age, gender, branch, year, location, instagram, interests, hobbies, profile_picture, email, created_at')
       .neq('id', userId)
-      .order('createdAt', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (error) {
       console.error('❌ Get profiles error:', error)
@@ -214,12 +284,14 @@ async function handleGetProfiles(request) {
 
     console.log('✅ Fetched', profiles?.length || 0, 'profiles from database')
     
-    // Log some sample emails for debugging
-    if (profiles && profiles.length > 0) {
-      console.log('📧 Sample emails in database:', profiles.slice(0, 5).map(p => p.email))
-    }
+    // Map profile_picture to photo_url for frontend compatibility
+    const profilesWithPhotoUrl = profiles.map(p => ({
+      ...p,
+      photo_url: p.profile_picture,
+      department: p.branch
+    }))
 
-    return NextResponse.json({ profiles: profiles || [] })
+    return NextResponse.json({ profiles: profilesWithPhotoUrl || [] })
   } catch (error) {
     console.error('❌ Get profiles error:', error)
     return NextResponse.json(
@@ -232,18 +304,29 @@ async function handleGetProfiles(request) {
 async function handleUpdateProfile(request) {
   try {
     const body = await request.json()
-    const { userId, name, bio, department, year, interests, photo_url } = body
+    const { userId, name, bio, age, gender, profile_picture, photo_url, location, instagram, interests, hobbies, department, year } = body
 
-    const { data, error } = await supabase
+    // Build update object with only provided fields
+    const updateData = {}
+    if (name !== undefined) updateData.name = name
+    if (bio !== undefined) updateData.bio = bio
+    if (age !== undefined) updateData.age = age
+    if (gender !== undefined) updateData.gender = gender
+    // Accept both profile_picture and photo_url (map photo_url to profile_picture)
+    if (photo_url !== undefined) updateData.profile_picture = photo_url
+    if (profile_picture !== undefined) updateData.profile_picture = profile_picture
+    if (location !== undefined) updateData.location = location
+    if (instagram !== undefined) updateData.instagram = instagram
+    if (interests !== undefined) updateData.interests = interests
+    if (hobbies !== undefined) updateData.hobbies = hobbies
+    if (department !== undefined) updateData.branch = department // Map department to branch
+    if (year !== undefined) updateData.year = year
+    
+    updateData.updated_at = new Date().toISOString()
+
+    const { data, error } = await supabaseAdmin
       .from('profiles')
-      .update({
-        name,
-        bio,
-        department,
-        year,
-        interests,
-        photo_url
-      })
+      .update(updateData)
       .eq('id', userId)
       .select()
       .single()
@@ -251,13 +334,19 @@ async function handleUpdateProfile(request) {
     if (error) {
       console.error('Update profile error:', error)
       return NextResponse.json(
-        { error: 'Failed to update profile' },
+        { error: `Failed to update profile: ${error.message}` },
         { status: 500 }
       )
     }
 
-    const { password: _, ...profileWithoutPassword } = data
-    return NextResponse.json({ profile: profileWithoutPassword })
+    // Map profile_picture to photo_url for frontend compatibility
+    const profileWithPhotoUrl = {
+      ...data,
+      photo_url: data.profile_picture,
+      department: data.branch
+    }
+
+    return NextResponse.json({ profile: profileWithPhotoUrl })
   } catch (error) {
     console.error('Update profile error:', error)
     return NextResponse.json(
@@ -267,36 +356,44 @@ async function handleUpdateProfile(request) {
   }
 }
 
-// Like Routes
+// Like Routes - FIXED to use liker_id and liked_id
 async function handleLike(request) {
   try {
     const body = await request.json()
     const { fromUserId, toUserId } = body
 
-    // Check if already liked
+    // Check if already liked - FIXED column names
     const { data: existingLike } = await supabase
       .from('likes')
       .select('id')
-      .eq('fromUserId', fromUserId)
-      .eq('toUserId', toUserId)
+      .eq('liker_id', fromUserId)
+      .eq('liked_id', toUserId)
       .single()
 
     if (existingLike) {
-      return NextResponse.json(
-        { error: 'Already liked this user' },
-        { status: 400 }
-      )
+      // Unlike: Delete the existing like
+      const { error: deleteError } = await supabase
+        .from('likes')
+        .delete()
+        .eq('id', existingLike.id)
+
+      if (deleteError) {
+        console.error('Unlike error:', deleteError)
+        return NextResponse.json(
+          { error: 'Failed to unlike user' },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json({ success: true, unliked: true })
     }
 
-    // Create like
-    const likeId = uuidv4()
+    // Create like - FIXED column names
     const { error: likeError } = await supabase
       .from('likes')
       .insert([{
-        id: likeId,
-        fromUserId,
-        toUserId,
-        createdAt: new Date().toISOString()
+        liker_id: fromUserId,
+        liked_id: toUserId
       }])
 
     if (likeError) {
@@ -307,39 +404,35 @@ async function handleLike(request) {
       )
     }
 
-    // Check if it's a match (other user also liked back)
+    // Increment like counter using SQL function
+    await supabase.rpc('increment_like_count', { profile_id: toUserId })
+
+    // Check if it's a match - FIXED column names
     const { data: reciprocalLike } = await supabase
       .from('likes')
       .select('id')
-      .eq('fromUserId', toUserId)
-      .eq('toUserId', fromUserId)
+      .eq('liker_id', toUserId)
+      .eq('liked_id', fromUserId)
       .single()
 
     let matched = false
 
     if (reciprocalLike) {
-      // Create match
       matched = true
-      const matchId = uuidv4()
-      
-      // Ensure consistent ordering (smaller ID first)
       const [user1Id, user2Id] = [fromUserId, toUserId].sort()
 
-      // Check if match already exists
       const { data: existingMatch } = await supabase
         .from('matches')
         .select('id')
-        .or(`and(user1Id.eq.${user1Id},user2Id.eq.${user2Id}),and(user1Id.eq.${user2Id},user2Id.eq.${user1Id})`)
+        .or(`and(user1id.eq.${user1Id},user2id.eq.${user2Id}),and(user1id.eq.${user2Id},user2id.eq.${user1Id})`)
         .single()
 
       if (!existingMatch) {
         await supabase
           .from('matches')
           .insert([{
-            id: matchId,
-            user1Id,
-            user2Id,
-            createdAt: new Date().toISOString()
+            user1id: user1Id,
+            user2id: user2Id
           }])
       }
     }
@@ -354,7 +447,7 @@ async function handleLike(request) {
   }
 }
 
-// Get user's likes
+// Get user's likes - FIXED
 async function handleGetLikes(request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -370,7 +463,7 @@ async function handleGetLikes(request) {
     const { data: likes, error } = await supabase
       .from('likes')
       .select('*')
-      .eq('fromUserId', userId)
+      .eq('liker_id', userId)
 
     if (error) {
       console.error('Get likes error:', error)
@@ -390,7 +483,7 @@ async function handleGetLikes(request) {
   }
 }
 
-// Match Routes
+// Match Routes - FIXED to use correct column names
 async function handleGetMatches(request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -404,11 +497,11 @@ async function handleGetMatches(request) {
     }
 
     // Get matches where user is either user1 or user2
-    const { data: matches, error } = await supabase
+    const { data: matches, error } = await supabaseAdmin
       .from('matches')
       .select('*')
-      .or(`user1Id.eq.${userId},user2Id.eq.${userId}`)
-      .order('createdAt', { ascending: false })
+      .or(`user1id.eq.${userId},user2id.eq.${userId}`)
+      .order('createdat', { ascending: false })
 
     if (error) {
       console.error('Get matches error:', error)
@@ -419,12 +512,12 @@ async function handleGetMatches(request) {
     }
 
     // Get blocked users for current user
-    const { data: blockedByMe } = await supabase
+    const { data: blockedByMe } = await supabaseAdmin
       .from('blocked_users')
       .select('blocked_id')
       .eq('blocker_id', userId)
 
-    const { data: blockedMe } = await supabase
+    const { data: blockedMe } = await supabaseAdmin
       .from('blocked_users')
       .select('blocker_id')
       .eq('blocked_id', userId)
@@ -434,46 +527,65 @@ async function handleGetMatches(request) {
       ...(blockedMe || []).map(b => b.blocker_id)
     ])
 
-    // Get profile details for matched users and last message timestamp
+    // Get profile details for matched users
     const matchesWithProfiles = await Promise.all(
       (matches || []).map(async (match) => {
-        const matchedUserId = match.user1Id === userId ? match.user2Id : match.user1Id
+        const matchedUserId = match.user1id === userId ? match.user2id : match.user1id
         
-        // Check if this user is blocked
         const isBlocked = blockedUserIds.has(matchedUserId)
         const blockedBy = blockedMe?.find(b => b.blocker_id === matchedUserId) ? 'them' : 
                          blockedByMe?.find(b => b.blocked_id === matchedUserId) ? 'me' : null
         
-        const { data: matchedUser } = await supabase
+        // FIXED: Use correct column names from profiles table
+        const { data: matchedUser } = await supabaseAdmin
           .from('profiles')
-          .select('id, name, bio, department, year, interests, photo_url')
+          .select('id, name, bio, branch, year, interests, profile_picture')
           .eq('id', matchedUserId)
           .single()
 
-        // Get the most recent message for this match to use for sorting
-        const { data: lastMessage } = await supabase
+        // Get most recent message
+        const { data: lastMessage } = await supabaseAdmin
           .from('messages')
-          .select('createdAt')
-          .eq('matchId', match.id)
-          .order('createdAt', { ascending: false })
+          .select('created_at')
+          .eq('sender_id', userId)
+          .eq('receiver_id', matchedUserId)
+          .order('created_at', { ascending: false })
           .limit(1)
           .single()
 
+        const { data: lastMessage2 } = await supabaseAdmin
+          .from('messages')
+          .select('created_at')
+          .eq('sender_id', matchedUserId)
+          .eq('receiver_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        const lastMessageTime = lastMessage?.created_at || lastMessage2?.created_at || match.createdat
+
+        // Map to frontend expected format
+        const mappedUser = matchedUser ? {
+          ...matchedUser,
+          photo_url: matchedUser.profile_picture,
+          department: matchedUser.branch
+        } : null
+
         return {
           ...match,
-          matchedUser,
+          matchedUser: mappedUser,
           isBlocked,
           blockedBy,
-          lastMessageTime: lastMessage?.createdAt || match.createdAt // Use match creation time if no messages yet
+          lastMessageTime
         }
       })
     )
 
-    // Sort matches by last message time (most recent first)
+    // Sort by last message time
     matchesWithProfiles.sort((a, b) => {
       const timeA = new Date(a.lastMessageTime).getTime()
       const timeB = new Date(b.lastMessageTime).getTime()
-      return timeB - timeA // Descending order (newest first)
+      return timeB - timeA
     })
 
     return NextResponse.json({ matches: matchesWithProfiles })
@@ -486,38 +598,76 @@ async function handleGetMatches(request) {
   }
 }
 
-// Message Routes
+// Message Routes - FIXED to use sender_id and receiver_id
 async function handleGetMessages(request) {
   try {
     const { searchParams } = new URL(request.url)
     const matchId = searchParams.get('matchId')
 
+    console.log('📥 GET /api/messages - matchId:', matchId)
+
     if (!matchId) {
+      console.log('❌ No matchId provided')
       return NextResponse.json(
         { error: 'Match ID required' },
         { status: 400 }
       )
     }
 
-    const { data: messages, error } = await supabase
+    // Get the match to find user IDs
+    const { data: match, error: matchError } = await supabaseAdmin
+      .from('matches')
+      .select('*')
+      .eq('id', matchId)
+      .single()
+
+    if (matchError || !match) {
+      console.error('❌ Match not found:', matchError)
+      return NextResponse.json(
+        { error: 'Match not found' },
+        { status: 404 }
+      )
+    }
+
+    const userId1 = match.user1id
+    const userId2 = match.user2id
+
+    console.log('🔍 Querying messages between users:', userId1, userId2)
+
+    // Get messages between these two users (bidirectional)
+    const { data: messages, error } = await supabaseAdmin
       .from('messages')
       .select('*')
-      .eq('matchId', matchId)
-      .order('createdAt', { ascending: true })
+      .or(`and(sender_id.eq.${userId1},receiver_id.eq.${userId2}),and(sender_id.eq.${userId2},receiver_id.eq.${userId1})`)
+      .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('Get messages error:', error)
+      console.error('❌ Get messages error:', error)
+      console.error('Error code:', error.code)
+      console.error('Error message:', error.message)
       return NextResponse.json(
-        { error: 'Failed to fetch messages' },
+        { error: 'Failed to fetch messages', details: error.message },
         { status: 500 }
       )
     }
 
-    return NextResponse.json({ messages: messages || [] })
+    console.log(`✅ Found ${messages?.length || 0} messages`)
+
+    // Map to frontend expected format
+    const mappedMessages = (messages || []).map(msg => ({
+      id: msg.id,
+      matchId: matchId,
+      senderId: msg.sender_id,
+      message: msg.content,
+      createdAt: msg.created_at
+    }))
+
+    return NextResponse.json({ messages: mappedMessages })
   } catch (error) {
-    console.error('Get messages error:', error)
+    console.error('💥 FATAL Get messages error:', error)
+    console.error('Stack:', error.stack)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error.message },
       { status: 500 }
     )
   }
@@ -528,32 +678,63 @@ async function handleSendMessage(request) {
     const body = await request.json()
     const { matchId, senderId, message } = body
 
-    const messageId = uuidv4()
-    const { data, error } = await supabase
+    console.log('📤 POST /api/messages - matchId:', matchId, 'senderId:', senderId)
+
+    // Get the match to find receiver ID
+    const { data: match, error: matchError } = await supabaseAdmin
+      .from('matches')
+      .select('*')
+      .eq('id', matchId)
+      .single()
+
+    if (matchError || !match) {
+      console.error('❌ Match not found:', matchError)
+      return NextResponse.json(
+        { error: 'Match not found' },
+        { status: 404 }
+      )
+    }
+
+    // Determine receiver ID (the other user in the match)
+    const receiverId = match.user1id === senderId ? match.user2id : match.user1id
+
+    console.log('📨 Sending message from', senderId, 'to', receiverId)
+
+    // Insert message with sender_id and receiver_id
+    const { data, error } = await supabaseAdmin
       .from('messages')
       .insert([{
-        id: messageId,
-        matchId,
-        senderId,
-        message,
-        createdAt: new Date().toISOString()
+        sender_id: senderId,
+        receiver_id: receiverId,
+        content: message
       }])
       .select()
       .single()
 
     if (error) {
-      console.error('Send message error:', error)
+      console.error('❌ Send message error:', error)
       return NextResponse.json(
-        { error: 'Failed to send message' },
+        { error: 'Failed to send message', details: error.message },
         { status: 500 }
       )
     }
 
-    return NextResponse.json({ message: data })
+    console.log('✅ Message sent successfully')
+
+    // Map to frontend format
+    const mappedMessage = {
+      id: data.id,
+      matchId: matchId,
+      senderId: data.sender_id,
+      message: data.content,
+      createdAt: data.created_at
+    }
+
+    return NextResponse.json({ message: mappedMessage })
   } catch (error) {
-    console.error('Send message error:', error)
+    console.error('💥 FATAL Send message error:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error.message },
       { status: 500 }
     )
   }
@@ -575,7 +756,6 @@ async function handleGetOnlineUsers(request) {
 
 async function handleUpdateOnlineStatus(request) {
   try {
-    // Check if request has a body
     const text = await request.text()
     if (!text || text.trim() === '') {
       return NextResponse.json(
@@ -584,7 +764,6 @@ async function handleUpdateOnlineStatus(request) {
       )
     }
 
-    // Parse the JSON
     const body = JSON.parse(text)
     const { userId } = body
 
@@ -595,7 +774,6 @@ async function handleUpdateOnlineStatus(request) {
       )
     }
 
-    // Update last seen timestamp
     onlineUsers.set(userId, Date.now())
 
     return NextResponse.json({ success: true })
@@ -609,10 +787,9 @@ async function handleUpdateOnlineStatus(request) {
 }
 
 // Admin Routes
-// Admin credentials (in production, store this securely in database)
 const ADMIN_CREDENTIALS = {
   username: 'admin',
-  password: hashPassword('admin123') // Change this password!
+  password: hashPassword('admin123')
 }
 
 async function handleAdminLogin(request) {
@@ -642,35 +819,36 @@ async function handleAdminLogin(request) {
 async function handleAdminGetUsers(request) {
   try {
     const url = new URL(request.url)
-    const sortBy = url.searchParams.get('sortBy') || 'createdAt'
+    const sortBy = url.searchParams.get('sortBy') || 'created_at'
     
-    // Get all users with their stats
-    const { data: users, error } = await supabase
+    const { data: users, error } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .order(sortBy, { ascending: false })
 
     if (error) throw error
 
-    // Get match counts for each user
+    // Get match counts for each user - FIXED column names
     const usersWithStats = await Promise.all(users.map(async (user) => {
-      const { count: matchCount } = await supabase
+      const { count: matchCount } = await supabaseAdmin
         .from('matches')
         .select('*', { count: 'exact', head: true })
-        .or(`userId1.eq.${user.id},userId2.eq.${user.id}`)
+        .or(`user1id.eq.${user.id},user2id.eq.${user.id}`)
 
-      const { count: likesSent } = await supabase
+      const { count: likesSent } = await supabaseAdmin
         .from('likes')
         .select('*', { count: 'exact', head: true })
-        .eq('likerId', user.id)
+        .eq('liker_id', user.id)
 
-      const { count: likesReceived } = await supabase
+      const { count: likesReceived } = await supabaseAdmin
         .from('likes')
         .select('*', { count: 'exact', head: true })
-        .eq('likedId', user.id)
+        .eq('liked_id', user.id)
 
       return {
         ...user,
+        photo_url: user.profile_picture,
+        department: user.branch,
         matchCount: matchCount || 0,
         likesSent: likesSent || 0,
         likesReceived: likesReceived || 0,
@@ -689,45 +867,43 @@ async function handleAdminGetUsers(request) {
 
 async function handleAdminGetConversations(request) {
   try {
-    // Get all matches with user details
-    const { data: matches, error } = await supabase
+    const { data: matches, error } = await supabaseAdmin
       .from('matches')
       .select('*')
-      .order('createdAt', { ascending: false })
+      .order('createdat', { ascending: false })
 
     if (error) throw error
 
-    // Get user details and message counts for each match
     const conversationsWithDetails = await Promise.all(matches.map(async (match) => {
-      const { data: user1 } = await supabase
+      const { data: user1 } = await supabaseAdmin
         .from('profiles')
-        .select('id, name, email, photo_url, department, year')
-        .eq('id', match.user1Id)
+        .select('id, name, email, profile_picture, branch, year')
+        .eq('id', match.user1id)
         .single()
 
-      const { data: user2 } = await supabase
+      const { data: user2 } = await supabaseAdmin
         .from('profiles')
-        .select('id, name, email, photo_url, department, year')
-        .eq('id', match.user2Id)
+        .select('id, name, email, profile_picture, branch, year')
+        .eq('id', match.user2id)
         .single()
 
-      const { data: messages, count: messageCount } = await supabase
+      const { data: messages, count: messageCount } = await supabaseAdmin
         .from('messages')
         .select('*', { count: 'exact' })
-        .eq('matchId', match.id)
-        .order('createdAt', { ascending: false })
+        .or(`and(sender_id.eq.${match.user1id},receiver_id.eq.${match.user2id}),and(sender_id.eq.${match.user2id},receiver_id.eq.${match.user1id})`)
+        .order('created_at', { ascending: false })
 
       const lastMessage = messages && messages.length > 0 ? messages[0] : null
 
       return {
         matchId: match.id,
-        user1,
-        user2,
+        user1: user1 ? { ...user1, photo_url: user1.profile_picture, department: user1.branch } : null,
+        user2: user2 ? { ...user2, photo_url: user2.profile_picture, department: user2.branch } : null,
         messageCount: messageCount || 0,
         lastMessage,
-        createdAt: match.createdAt,
-        user1Online: onlineUsers.has(match.user1Id),
-        user2Online: onlineUsers.has(match.user2Id)
+        createdAt: match.createdat,
+        user1Online: onlineUsers.has(match.user1id),
+        user2Online: onlineUsers.has(match.user2id)
       }
     }))
 
@@ -742,34 +918,31 @@ async function handleAdminGetConversations(request) {
 
 async function handleAdminGetStats(request) {
   try {
-    // Get total counts
-    const { count: totalUsers } = await supabase
+    const { count: totalUsers } = await supabaseAdmin
       .from('profiles')
       .select('*', { count: 'exact', head: true })
 
-    const { count: totalMatches } = await supabase
+    const { count: totalMatches } = await supabaseAdmin
       .from('matches')
       .select('*', { count: 'exact', head: true })
 
-    const { count: totalMessages } = await supabase
+    const { count: totalMessages } = await supabaseAdmin
       .from('messages')
       .select('*', { count: 'exact', head: true })
 
-    const { count: totalLikes } = await supabase
+    const { count: totalLikes } = await supabaseAdmin
       .from('likes')
       .select('*', { count: 'exact', head: true })
 
-    // Get newly joined users (last 7 days)
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
-    const { data: newUsers } = await supabase
+    const { data: newUsers } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .gte('createdAt', sevenDaysAgo.toISOString())
-      .order('createdAt', { ascending: false })
+      .gte('created_at', sevenDaysAgo.toISOString())
+      .order('created_at', { ascending: false })
 
-    // Get online users count
     const onlineCount = onlineUsers.size
 
     return NextResponse.json({
@@ -802,26 +975,24 @@ async function handleSendWarning(request) {
       )
     }
 
-    // Create warning in database
+    // FIXED: Use correct column names (user_id instead of userId, reason instead of message)
     const { data: warning, error } = await supabase
       .from('warnings')
       .insert({
-        id: uuidv4(),
-        userId,
-        message,
-        isRead: false,
-        createdAt: new Date().toISOString()
+        user_id: userId,
+        reason: message,
+        severity: 'medium',
+        resolved: false
       })
       .select()
       .single()
 
     if (error) throw error
 
-    // Count total warnings for this user (including the new one)
     const { data: allWarnings, error: countError } = await supabase
       .from('warnings')
       .select('id')
-      .eq('userId', userId)
+      .eq('user_id', userId)
 
     if (countError) throw countError
 
@@ -829,28 +1000,21 @@ async function handleSendWarning(request) {
 
     // Auto-ban if user has 5 or more warnings
     if (warningCount >= 5) {
-      // Check if user is already banned
       const { data: existingBan } = await supabase
         .from('banned_users')
         .select('*')
-        .eq('userid', userId)
-        .eq('isactive', true)
+        .eq('user_id', userId)
         .single()
 
       if (!existingBan) {
-        // Automatically ban the user
         await supabase
           .from('banned_users')
           .insert({
-            id: uuidv4(),
-            userid: userId,
+            user_id: userId,
             reason: `Automatically banned for receiving ${warningCount} warnings`,
-            bannedby: 'System (Auto-ban)',
-            bannedat: new Date().toISOString(),
-            isactive: true
+            ban_type: 'permanent'
           })
 
-        // Remove from online users
         onlineUsers.delete(userId)
 
         return NextResponse.json({
@@ -889,13 +1053,13 @@ async function handleGetWarnings(request) {
       )
     }
 
-    // Get unread warnings for user
+    // FIXED: Use correct column names
     const { data: warnings, error } = await supabase
       .from('warnings')
       .select('*')
-      .eq('userId', userId)
-      .eq('isRead', false)
-      .order('createdAt', { ascending: false })
+      .eq('user_id', userId)
+      .eq('resolved', false)
+      .order('created_at', { ascending: false })
 
     if (error) throw error
 
@@ -920,9 +1084,10 @@ async function handleMarkWarningAsRead(request) {
       )
     }
 
+    // FIXED: Use resolved column
     const { error } = await supabase
       .from('warnings')
-      .update({ isRead: true })
+      .update({ resolved: true, resolved_at: new Date().toISOString() })
       .eq('id', warningId)
 
     if (error) throw error
@@ -936,7 +1101,7 @@ async function handleMarkWarningAsRead(request) {
   }
 }
 
-// Ban/Unban User Functions
+// Ban/Unban User Functions - FIXED
 async function handleBanUser(request) {
   try {
     const body = await request.json()
@@ -949,12 +1114,11 @@ async function handleBanUser(request) {
       )
     }
 
-    // Check if user is already banned
+    // FIXED: Use correct column names
     const { data: existingBan } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('userid', userId)
-      .eq('isactive', true)
+      .eq('user_id', userId)
       .single()
 
     if (existingBan) {
@@ -964,23 +1128,19 @@ async function handleBanUser(request) {
       )
     }
 
-    // Create ban record
     const { data: ban, error } = await supabase
       .from('banned_users')
       .insert({
-        id: uuidv4(),
-        userid: userId,
+        user_id: userId,
+        banned_by: bannedBy,
         reason,
-        bannedby: bannedBy,
-        bannedat: new Date().toISOString(),
-        isactive: true
+        ban_type: 'permanent'
       })
       .select()
       .single()
 
     if (error) throw error
 
-    // Remove user from online users
     onlineUsers.delete(userId)
 
     return NextResponse.json({
@@ -1007,19 +1167,18 @@ async function handleUnbanUser(request) {
       )
     }
 
-    // Deactivate ban
+    // FIXED: Just delete the ban record
     const { data, error } = await supabase
       .from('banned_users')
-      .update({ isactive: false })
-      .eq('userid', userId)
-      .eq('isactive', true)
+      .delete()
+      .eq('user_id', userId)
       .select()
 
     if (error) throw error
 
     if (!data || data.length === 0) {
       return NextResponse.json(
-        { error: 'User is not currently banned or already unbanned' },
+        { error: 'User is not currently banned' },
         { status: 404 }
       )
     }
@@ -1039,27 +1198,25 @@ async function handleUnbanUser(request) {
 
 async function handleGetBannedUsers(request) {
   try {
-    // Get all active bans with user details
+    // FIXED: No isactive column, just get all bans
     const { data: bans, error } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('isactive', true)
-      .order('bannedat', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (error) throw error
 
-    // Get user details for each ban
     const bansWithDetails = await Promise.all(
       (bans || []).map(async (ban) => {
         const { data: user } = await supabase
           .from('profiles')
-          .select('id, name, email, photo_url, department, year')
-          .eq('id', ban.userid)
+          .select('id, name, email, profile_picture, branch, year')
+          .eq('id', ban.user_id)
           .single()
 
         return {
           ...ban,
-          user
+          user: user ? { ...user, photo_url: user.profile_picture, department: user.branch } : null
         }
       })
     )
@@ -1085,15 +1242,14 @@ async function handleCheckBanStatus(request) {
       )
     }
 
-    // Check if user is banned
+    // FIXED: Use user_id column
     const { data: ban, error } = await supabase
       .from('banned_users')
       .select('*')
-      .eq('userid', userId)
-      .eq('isactive', true)
+      .eq('user_id', userId)
       .single()
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+    if (error && error.code !== 'PGRST116') {
       throw error
     }
 
@@ -1109,7 +1265,7 @@ async function handleCheckBanStatus(request) {
   }
 }
 
-// Delete User Function - Permanently remove account
+// Delete User Function - FIXED
 async function handleDeleteUser(request) {
   try {
     const body = await request.json()
@@ -1122,7 +1278,6 @@ async function handleDeleteUser(request) {
       )
     }
 
-    // Verify admin password for security
     if (adminPassword !== 'admin123') {
       return NextResponse.json(
         { error: 'Invalid admin password' },
@@ -1130,26 +1285,31 @@ async function handleDeleteUser(request) {
       )
     }
 
-    // Remove user from online users
     onlineUsers.delete(userId)
 
-    // Delete all related data (cascade delete)
-    // 1. Delete warnings
-    await supabase.from('warnings').delete().eq('userId', userId)
+    // FIXED: Use correct column names
+    // Warnings
+    await supabase.from('warnings').delete().eq('user_id', userId)
 
-    // 2. Delete messages (both sent and received)
-    await supabase.from('messages').delete().or(`senderId.eq.${userId},receiverId.eq.${userId}`)
+    // Messages
+    await supabase.from('messages').delete().or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
 
-    // 3. Delete matches
-    await supabase.from('matches').delete().or(`userId1.eq.${userId},userId2.eq.${userId}`)
+    // Matches
+    await supabase.from('matches').delete().or(`user1Id.eq.${userId},user2Id.eq.${userId}`)
 
-    // 4. Delete likes (both sent and received)
-    await supabase.from('likes').delete().or(`fromUserId.eq.${userId},toUserId.eq.${userId}`)
+    // Likes
+    await supabase.from('likes').delete().or(`liker_id.eq.${userId},liked_id.eq.${userId}`)
 
-    // 5. Delete ban records
-    await supabase.from('banned_users').delete().eq('userid', userId)
+    // Blocked users
+    await supabase.from('blocked_users').delete().or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`)
 
-    // 6. Finally, delete the user profile
+    // Ban records
+    await supabase.from('banned_users').delete().eq('user_id', userId)
+
+    // Friend requests
+    await supabase.from('friend_requests').delete().or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+
+    // Profile
     const { error } = await supabase
       .from('profiles')
       .delete()
@@ -1174,73 +1334,60 @@ async function handleSendFriendRequest(request) {
   try {
     const { senderId, receiverId } = await request.json()
 
-    console.log('📤 Friend request: User', senderId, '→ User', receiverId)
+    const [matchCheck, requestCheck, blockCheck] = await Promise.all([
+      supabaseAdmin
+        .from('matches')
+        .select('id')
+        .or(`and(user1Id.eq.${senderId},user2Id.eq.${receiverId}),and(user1Id.eq.${receiverId},user2Id.eq.${senderId})`)
+        .maybeSingle(),
+      
+      supabaseAdmin
+        .from('friend_requests')
+        .select('id')
+        .eq('sender_id', senderId)
+        .eq('receiver_id', receiverId)
+        .eq('status', 'pending')
+        .maybeSingle(),
+      
+      supabaseAdmin
+        .from('blocked_users')
+        .select('blocker_id')
+        .or(`and(blocker_id.eq.${senderId},blocked_id.eq.${receiverId}),and(blocker_id.eq.${receiverId},blocked_id.eq.${senderId})`)
+        .maybeSingle()
+    ])
 
-    // Check if already matched
-    const { data: existingMatch } = await supabase
-      .from('matches')
-      .select('id')
-      .or(`and(user1Id.eq.${senderId},user2Id.eq.${receiverId}),and(user1Id.eq.${receiverId},user2Id.eq.${senderId})`)
-      .single()
-
-    if (existingMatch) {
+    if (matchCheck.data) {
       return NextResponse.json(
         { error: 'You are already friends' },
         { status: 400 }
       )
     }
 
-    // Check if already sent (prevent duplicates)
-    const { data: existingSent } = await supabase
-      .from('friend_requests')
-      .select('*')
-      .eq('sender_id', senderId)
-      .eq('receiver_id', receiverId)
-      .eq('status', 'pending')
-      .single()
-
-    if (existingSent) {
+    if (requestCheck.data) {
       return NextResponse.json(
         { error: 'Friend request already sent' },
         { status: 400 }
       )
     }
 
-    // Check if blocked
-    const { data: blocked } = await supabase
-      .from('blocked_users')
-      .select('*')
-      .or(`and(blocker_id.eq.${senderId},blocked_id.eq.${receiverId}),and(blocker_id.eq.${receiverId},blocked_id.eq.${senderId})`)
-      .single()
-
-    if (blocked) {
+    if (blockCheck.data) {
       return NextResponse.json(
         { error: 'Cannot send friend request' },
         { status: 403 }
       )
     }
 
-    // Create a normal pending request (Instagram style - NO auto-matching)
-    // User B must manually accept the request from notification bar
-    const { data, error } = await supabase
+    const { error } = await supabaseAdmin
       .from('friend_requests')
       .insert({
         sender_id: senderId,
         receiver_id: receiverId,
         status: 'pending'
       })
-      .select()
-      .single()
 
     if (error) throw error
 
-    console.log('✅ Friend request sent successfully')
-
-    return NextResponse.json({
-      success: true,
-      matched: false,
-      request: data
-    })
+    return NextResponse.json({ success: true })
   } catch (error) {
     console.error('❌ Send friend request error:', error)
     return NextResponse.json(
@@ -1257,8 +1404,7 @@ async function handleGetSentRequests(request) {
 
     console.log('📤 Loading sent friend requests for userId:', userId)
 
-    // Get outgoing friend requests (sent by this user)
-    const { data: sentRequests, error } = await supabase
+    const { data: sentRequests, error } = await supabaseAdmin
       .from('friend_requests')
       .select('*')
       .eq('sender_id', userId)
@@ -1289,8 +1435,7 @@ async function handleGetPendingRequests(request) {
 
     console.log('📥 Loading friend requests for userId:', userId)
 
-    // Get incoming friend requests
-    const { data: requests, error } = await supabase
+    const { data: requests, error } = await supabaseAdmin
       .from('friend_requests')
       .select('*')
       .eq('receiver_id', userId)
@@ -1304,31 +1449,24 @@ async function handleGetPendingRequests(request) {
 
     console.log('📋 Found', requests?.length || 0, 'friend requests')
 
-    // Get all existing matches for this user to filter out
-    const { data: existingMatches } = await supabase
+    const { data: existingMatches } = await supabaseAdmin
       .from('matches')
-      .select('user1Id, user2Id')
-      .or(`user1Id.eq.${userId},user2Id.eq.${userId}`)
+      .select('user1id, user2id')
+      .or(`user1id.eq.${userId},user2id.eq.${userId}`)
 
     const matchedUserIds = new Set(
       (existingMatches || []).map(match => 
-        match.user1Id === userId ? match.user2Id : match.user1Id
+        match.user1id === userId ? match.user2id : match.user1id
       )
     )
 
-    console.log('🤝 User already matched with', matchedUserIds.size, 'people')
-
-    // Filter out requests from users who are already matched
     const pendingRequests = (requests || []).filter(req => !matchedUserIds.has(req.sender_id))
 
-    console.log('📋 After filtering, showing', pendingRequests.length, 'pending requests')
-
-    // Get full sender profiles for each request
     const requestsWithProfiles = await Promise.all(
       pendingRequests.map(async (req) => {
-        const { data: senderProfile, error: profileError } = await supabase
+        const { data: senderProfile, error: profileError } = await supabaseAdmin
           .from('profiles')
-          .select('id, name, bio, department, year, interests, photo_url, email')
+          .select('id, name, bio, branch, year, interests, profile_picture, email')
           .eq('id', req.sender_id)
           .single()
 
@@ -1347,8 +1485,6 @@ async function handleGetPendingRequests(request) {
           }
         }
 
-        console.log('✅ Loaded profile for sender:', senderProfile.name)
-
         return {
           id: req.id,
           sender_id: req.sender_id,
@@ -1356,8 +1492,9 @@ async function handleGetPendingRequests(request) {
           status: req.status,
           created_at: req.created_at,
           requestedAt: req.created_at,
-          // Spread all sender profile fields at the top level
-          ...senderProfile
+          ...senderProfile,
+          photo_url: senderProfile.profile_picture,
+          department: senderProfile.branch
         }
       })
     )
@@ -1380,8 +1517,7 @@ async function handleAcceptFriendRequest(request) {
 
     console.log('✅ Accepting friend request:', { requestId, userId1, userId2 })
 
-    // Update friend request status
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('friend_requests')
       .update({ status: 'accepted' })
       .eq('id', requestId)
@@ -1391,11 +1527,10 @@ async function handleAcceptFriendRequest(request) {
       throw updateError
     }
 
-    // Check if match already exists to avoid duplicates
-    const { data: existingMatch } = await supabase
+    const { data: existingMatch } = await supabaseAdmin
       .from('matches')
       .select('id')
-      .or(`and(user1Id.eq.${userId1},user2Id.eq.${userId2}),and(user1Id.eq.${userId2},user2Id.eq.${userId1})`)
+      .or(`and(user1id.eq.${userId1},user2id.eq.${userId2}),and(user1id.eq.${userId2},user2id.eq.${userId1})`)
       .single()
 
     if (existingMatch) {
@@ -1406,15 +1541,11 @@ async function handleAcceptFriendRequest(request) {
       })
     }
 
-    // Create match with correct column names: user1Id and user2Id
-    const matchId = uuidv4()
-    const { data: newMatch, error: matchError } = await supabase
+    const { data: newMatch, error: matchError } = await supabaseAdmin
       .from('matches')
       .insert({
-        id: matchId,
-        user1Id: userId1,
-        user2Id: userId2,
-        createdAt: new Date().toISOString()
+        user1id: userId1,
+        user2id: userId2
       })
       .select()
 
@@ -1423,7 +1554,7 @@ async function handleAcceptFriendRequest(request) {
       throw matchError
     }
 
-    console.log('✅ Match created successfully:', matchId)
+    console.log('✅ Match created successfully')
 
     return NextResponse.json({
       success: true,
@@ -1443,8 +1574,7 @@ async function handleRejectFriendRequest(request) {
   try {
     const { requestId } = await request.json()
 
-    // Update status to rejected or delete
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('friend_requests')
       .update({ status: 'rejected' })
       .eq('id', requestId)
@@ -1463,13 +1593,12 @@ async function handleRejectFriendRequest(request) {
   }
 }
 
-// Block user handlers
+// Block user handlers - FIXED
 async function handleBlockUser(request) {
   try {
     const { blockerId, blockedId } = await request.json()
 
-    // Insert block
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('blocked_users')
       .insert({
         blocker_id: blockerId,
@@ -1480,14 +1609,11 @@ async function handleBlockUser(request) {
 
     if (error) throw error
 
-    // Don't delete matches - keep them in friends list but blocked
-    // User will see "You can't chat anymore" message
-    
-    // Delete any likes between the two users so they can send fresh requests later
+    // Delete likes - FIXED column names
     await supabase
       .from('likes')
       .delete()
-      .or(`and(fromUserId.eq.${blockerId},toUserId.eq.${blockedId}),and(fromUserId.eq.${blockedId},toUserId.eq.${blockerId})`)
+      .or(`and(liker_id.eq.${blockerId},liked_id.eq.${blockedId}),and(liker_id.eq.${blockedId},liked_id.eq.${blockerId})`)
 
     return NextResponse.json({
       success: true,
@@ -1505,7 +1631,7 @@ async function handleUnblockUser(request) {
   try {
     const { blockerId, blockedId } = await request.json()
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('blocked_users')
       .delete()
       .eq('blocker_id', blockerId)
@@ -1530,7 +1656,7 @@ async function handleGetBlockedUsers(request) {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('blocked_users')
       .select('blocked_id')
       .eq('blocker_id', userId)
@@ -1546,280 +1672,29 @@ async function handleGetBlockedUsers(request) {
   }
 }
 
-// Leaderboard handlers
-async function handleGetLeaderboard(request) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const type = searchParams.get('type') || 'daily' // daily, weekly, alltime
-    const limit = parseInt(searchParams.get('limit') || '20')
-
-    let orderColumn = 'daily_likes'
-    if (type === 'weekly') orderColumn = 'weekly_likes'
-    if (type === 'alltime') orderColumn = 'total_likes'
-
-    // First try to get profiles with like columns
-    let { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order(orderColumn, { ascending: false })
-      .limit(limit)
-
-    // If columns don't exist, fetch all profiles and add default values
-    if (error && error.message.includes('column')) {
-      console.log('Like columns do not exist yet, returning profiles with default values')
-      const { data: allProfiles, error: fallbackError } = await supabase
-        .from('profiles')
-        .select('*')
-        .limit(limit)
-
-      if (fallbackError) throw fallbackError
-
-      // Add default like columns
-      data = allProfiles.map(profile => ({
-        ...profile,
-        total_likes: 0,
-        daily_likes: 0,
-        weekly_likes: 0,
-        profile_views: 0
-      }))
-    } else if (error) {
-      throw error
-    }
-
-    return NextResponse.json({
-      leaderboard: data || [],
-      type,
-      columnsExist: !error || !error.message.includes('column')
-    })
-  } catch (error) {
-    console.error('Leaderboard error:', error)
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    )
-  }
-}
-
-async function handleGetTrending(request) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const limit = parseInt(searchParams.get('limit') || '10')
-
-    // Get profiles with most likes today
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('daily_likes', { ascending: false })
-      .limit(limit)
-
-    if (error) throw error
-
-    return NextResponse.json({
-      trending: data || []
-    })
-  } catch (error) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    )
-  }
-}
-
-async function handleIncrementView(request) {
-  try {
-    const { profileId } = await request.json()
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ 
-        profile_views: supabase.raw('profile_views + 1')
-      })
-      .eq('id', profileId)
-
-    if (error) throw error
-
-    return NextResponse.json({
-      success: true
-    })
-  } catch (error) {
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    )
-  }
-}
-
-async function handleIncrementLike(request) {
-  try {
-    const { profileId } = await request.json()
-
-    if (!profileId) {
-      return NextResponse.json(
-        { error: 'Profile ID is required' },
-        { status: 400 }
-      )
-    }
-
-    console.log('Incrementing like for profile:', profileId)
-
-    // Get current values
-    const { data: profile, error: fetchError } = await supabase
-      .from('profiles')
-      .select('total_likes, daily_likes, weekly_likes')
-      .eq('id', profileId)
-      .single()
-
-    if (fetchError) {
-      console.error('Error fetching profile:', fetchError)
-      
-      if (fetchError.message.includes('column')) {
-        return NextResponse.json(
-          { 
-            error: 'Leaderboard columns not found',
-            message: 'Columns do not exist',
-            columnsExist: false
-          },
-          { status: 500 }
-        )
-      }
-
-      return NextResponse.json(
-        { error: 'Profile not found', details: fetchError.message },
-        { status: 404 }
-      )
-    }
-
-    console.log('Current likes:', profile)
-
-    const newCounts = {
-      total_likes: (profile.total_likes || 0) + 1,
-      daily_likes: (profile.daily_likes || 0) + 1,
-      weekly_likes: (profile.weekly_likes || 0) + 1
-    }
-
-    console.log('Updating to:', newCounts)
-
-    // Update with incremented values
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update(newCounts)
-      .eq('id', profileId)
-
-    if (updateError) {
-      console.error('Error updating likes:', updateError)
-      return NextResponse.json(
-        { error: 'Failed to update likes', details: updateError.message },
-        { status: 500 }
-      )
-    }
-
-    console.log('✅ Like count updated successfully:', newCounts)
-
-    return NextResponse.json({
-      success: true,
-      message: 'Like count incremented',
-      columnsExist: true
-    })
-  } catch (error) {
-    console.error('handleIncrementLike error:', error)
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    )
-  }
-}
-
-async function handleDecrementLike(request) {
-  try {
-    const { profileId } = await request.json()
-
-    if (!profileId) {
-      return NextResponse.json(
-        { error: 'Profile ID is required' },
-        { status: 400 }
-      )
-    }
-
-    console.log('Decrementing like for profile:', profileId)
-
-    // Get current values
-    const { data: profile, error: fetchError } = await supabase
-      .from('profiles')
-      .select('total_likes, daily_likes, weekly_likes')
-      .eq('id', profileId)
-      .single()
-
-    if (fetchError) {
-      console.error('Error fetching profile:', fetchError)
-      return NextResponse.json(
-        { error: 'Profile not found', details: fetchError.message },
-        { status: 404 }
-      )
-    }
-
-    console.log('Current likes before decrement:', profile)
-
-    const newCounts = {
-      total_likes: Math.max((profile.total_likes || 0) - 1, 0),
-      daily_likes: Math.max((profile.daily_likes || 0) - 1, 0),
-      weekly_likes: Math.max((profile.weekly_likes || 0) - 1, 0)
-    }
-
-    console.log('Updating to:', newCounts)
-
-    // Update with decremented values
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update(newCounts)
-      .eq('id', profileId)
-
-    if (updateError) {
-      console.error('Error updating likes:', updateError)
-      return NextResponse.json(
-        { error: 'Failed to update likes', details: updateError.message },
-        { status: 500 }
-      )
-    }
-
-    console.log('✅ Like count decremented successfully:', newCounts)
-
-    return NextResponse.json({
-      success: true,
-      message: 'Like count decremented',
-      newCounts
-    })
-  } catch (error) {
-    console.error('handleDecrementLike error:', error)
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    )
-  }
-}
-
 async function handleRemoveFriend(request) {
   try {
     const { userId1, userId2 } = await request.json()
 
-    // Delete the match between the two users (correct column names: user1Id and user2Id)
-    const { error } = await supabase
+    // Delete match
+    const { error } = await supabaseAdmin
       .from('matches')
       .delete()
-      .or(`and(user1Id.eq.${userId1},user2Id.eq.${userId2}),and(user1Id.eq.${userId2},user2Id.eq.${userId1})`)
+      .or(`and(user1id.eq.${userId1},user2id.eq.${userId2}),and(user1id.eq.${userId2},user2id.eq.${userId1})`)
 
     if (error) throw error
 
-    // Delete any friend request entries to allow fresh requests
-    await supabase
+    // Delete friend requests
+    await supabaseAdmin
       .from('friend_requests')
       .delete()
       .or(`and(sender_id.eq.${userId1},receiver_id.eq.${userId2}),and(sender_id.eq.${userId2},receiver_id.eq.${userId1})`)
 
-    // Delete any likes between the two users so they can send fresh requests
-    await supabase
+    // Delete likes - FIXED column names
+    await supabaseAdmin
       .from('likes')
       .delete()
-      .or(`and(fromUserId.eq.${userId1},toUserId.eq.${userId2}),and(fromUserId.eq.${userId2},toUserId.eq.${userId1})`)
+      .or(`and(liker_id.eq.${userId1},liked_id.eq.${userId2}),and(liker_id.eq.${userId2},liked_id.eq.${userId1})`)
 
     return NextResponse.json({
       success: true,
@@ -1839,7 +1714,7 @@ async function handleGetEvents(request) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status') || 'upcoming'
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('events')
       .select('*')
       .order('event_date', { ascending: true })
@@ -1852,7 +1727,13 @@ async function handleGetEvents(request) {
 
     if (error) throw error
 
-    return NextResponse.json({ events: data || [] })
+    // Map location to venue for frontend compatibility
+    const eventsWithVenue = (data || []).map(event => ({
+      ...event,
+      venue: event.location
+    }))
+
+    return NextResponse.json({ events: eventsWithVenue })
   } catch (error) {
     return NextResponse.json(
       { error: error.message },
@@ -1879,18 +1760,17 @@ async function handleCreateEvent(request) {
       registration_required,
       registration_link,
       contact_email,
-      contact_phone,
-      created_by
+      contact_phone
     } = body
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('events')
       .insert({
         title,
         description,
         event_date,
         event_time,
-        venue,
+        location: venue, // Map venue to location column
         club_name,
         organizer,
         guests,
@@ -1901,8 +1781,9 @@ async function handleCreateEvent(request) {
         registration_link,
         contact_email,
         contact_phone,
-        created_by,
-        status: 'upcoming'
+        status: 'upcoming',
+        created_by: 'admin',
+        current_participants: 0
       })
       .select()
       .single()
@@ -1925,12 +1806,18 @@ async function handleCreateEvent(request) {
 async function handleUpdateEvent(request) {
   try {
     const body = await request.json()
-    const { eventId, ...updates } = body
+    const { eventId, venue, ...updates } = body
 
-    const { data, error } = await supabase
+    // Map venue to location if provided
+    const updateData = { ...updates }
+    if (venue !== undefined) {
+      updateData.location = venue
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('events')
       .update({
-        ...updates,
+        ...updateData,
         updated_at: new Date().toISOString()
       })
       .eq('id', eventId)
@@ -1939,10 +1826,16 @@ async function handleUpdateEvent(request) {
 
     if (error) throw error
 
+    // Map location back to venue for frontend
+    const eventWithVenue = {
+      ...data,
+      venue: data.location
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Event updated successfully',
-      event: data
+      event: eventWithVenue
     })
   } catch (error) {
     return NextResponse.json(
@@ -1957,7 +1850,7 @@ async function handleDeleteEvent(request) {
     const { searchParams } = new URL(request.url)
     const eventId = searchParams.get('eventId')
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('events')
       .delete()
       .eq('id', eventId)
@@ -2010,10 +1903,6 @@ export async function GET(request) {
     return handleGetPendingRequests(request)
   } else if (pathname.includes('/api/blocked-users')) {
     return handleGetBlockedUsers(request)
-  } else if (pathname.includes('/api/leaderboard')) {
-    return handleGetLeaderboard(request)
-  } else if (pathname.includes('/api/trending')) {
-    return handleGetTrending(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -2062,12 +1951,6 @@ export async function POST(request) {
     return handleUnblockUser(request)
   } else if (pathname.includes('/api/remove-friend')) {
     return handleRemoveFriend(request)
-  } else if (pathname.includes('/api/increment-like')) {
-    return handleIncrementLike(request)
-  } else if (pathname.includes('/api/decrement-like')) {
-    return handleDecrementLike(request)
-  } else if (pathname.includes('/api/increment-view')) {
-    return handleIncrementView(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
