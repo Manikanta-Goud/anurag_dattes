@@ -73,6 +73,8 @@ export default function App() {
   const [leaderboardType, setLeaderboardType] = useState('daily') // daily, weekly, alltime
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
   const [activeTab, setActiveTab] = useState('discover')
+  const [countdown, setCountdown] = useState({ hours: 0, minutes: 0, seconds: 0 })
+  const [previousRanks, setPreviousRanks] = useState({}) // Track previous ranks for arrows
 
   // Scroll tracking state
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
@@ -935,6 +937,13 @@ export default function App() {
       const data = await response.json()
       
       if (response.ok) {
+        // Track previous ranks before updating
+        const currentRanks = {}
+        leaderboardData.forEach((profile, idx) => {
+          currentRanks[profile.id] = idx + 1
+        })
+        setPreviousRanks(currentRanks)
+        
         setLeaderboardData(data.leaderboard || [])
         setLeaderboardType(type)
         console.log(`✅ Loaded ${type} leaderboard:`, data.leaderboard.length)
@@ -947,15 +956,108 @@ export default function App() {
     }
   }
 
-  const getBadge = (profile, rank) => {
-    const dailyRank = leaderboardType === 'daily' && rank <= 3
-    const weeklyRank = leaderboardType === 'weekly' && rank <= 10
-    const alltimeRank = leaderboardType === 'alltime' && rank <= 3
+  // Countdown timer effect
+  useEffect(() => {
+    const updateCountdown = () => {
+      const now = new Date()
+      let targetTime
+      
+      if (leaderboardType === 'daily') {
+        // Countdown to midnight
+        targetTime = new Date(now)
+        targetTime.setHours(24, 0, 0, 0)
+      } else if (leaderboardType === 'weekly') {
+        // Countdown to next Monday
+        targetTime = new Date(now)
+        const daysUntilMonday = (8 - now.getDay()) % 7 || 7
+        targetTime.setDate(now.getDate() + daysUntilMonday)
+        targetTime.setHours(0, 0, 0, 0)
+      }
+      
+      if (targetTime) {
+        const diff = targetTime - now
+        const hours = Math.floor(diff / (1000 * 60 * 60))
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+        setCountdown({ hours, minutes, seconds })
+      }
+    }
+    
+    updateCountdown()
+    const interval = setInterval(updateCountdown, 1000)
+    return () => clearInterval(interval)
+  }, [leaderboardType])
 
-    if (dailyRank && rank === 1) return { emoji: '🔥', text: 'Hottest Today', color: 'text-orange-500' }
-    if (dailyRank && rank <= 3) return { emoji: '🔥', text: 'Hot Today', color: 'text-orange-400' }
-    if (weeklyRank) return { emoji: '⭐', text: 'Rising Star', color: 'text-yellow-500' }
-    if (alltimeRank) return { emoji: '👑', text: 'Most Popular', color: 'text-purple-500' }
+  const getBadge = (profile, rank) => {
+    // Scarcity badges - only limited spots get special badges
+    if (leaderboardType === 'daily') {
+      if (rank === 1) return { emoji: '👑', text: 'King/Queen of the Day', color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
+      if (rank === 2) return { emoji: '🔥', text: 'Hottest Today', color: 'text-orange-500 bg-orange-100 border-orange-400' }
+      if (rank === 3) return { emoji: '🔥', text: 'Hot Today', color: 'text-red-500 bg-red-100 border-red-400' }
+      if (rank <= 10) return { emoji: '⭐', text: 'Rising Star', color: 'text-purple-500 bg-purple-100 border-purple-400' }
+    }
+    
+    if (leaderboardType === 'weekly') {
+      if (rank === 1) return { emoji: '👑', text: 'Week Champion', color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
+      if (rank <= 3) return { emoji: '🔥', text: 'Top 3 This Week', color: 'text-orange-500 bg-orange-100 border-orange-400' }
+      if (rank <= 10) return { emoji: '⭐', text: 'Rising Star', color: 'text-purple-500 bg-purple-100 border-purple-400' }
+    }
+    
+    if (leaderboardType === 'alltime') {
+      if (rank === 1) return { emoji: '👑', text: 'Most Popular Ever', color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
+      if (rank === 2) return { emoji: '🥈', text: 'Silver Legend', color: 'text-gray-500 bg-gray-100 border-gray-400' }
+      if (rank === 3) return { emoji: '🥉', text: 'Bronze Legend', color: 'text-orange-500 bg-orange-100 border-orange-400' }
+      if (rank <= 10) return { emoji: '⭐', text: 'Hall of Fame', color: 'text-purple-500 bg-purple-100 border-purple-400' }
+    }
+    
+    return null
+  }
+  
+  // Get position change indicator
+  const getPositionChange = (profileId, currentRank) => {
+    const prevRank = previousRanks[profileId]
+    if (!prevRank || prevRank === currentRank) return null
+    
+    if (prevRank > currentRank) {
+      // Rank improved (lower number is better)
+      const change = prevRank - currentRank
+      if (change >= 5) return { emoji: '🚀', text: `+${change}`, color: 'text-green-600', label: 'Trending!' }
+      return { emoji: '⬆️', text: `+${change}`, color: 'text-green-500', label: null }
+    } else {
+      // Rank dropped
+      const change = currentRank - prevRank
+      return { emoji: '⬇️', text: `-${change}`, color: 'text-red-500', label: null }
+    }
+  }
+  
+  // Get achievement progress for current user
+  const getAchievementProgress = (currentUserRank, topProfile) => {
+    if (!currentUserRank || !topProfile) return null
+    
+    const currentUserProfile = leaderboardData.find(p => p.id === currentUser?.id)
+    if (!currentUserProfile) return null
+    
+    const currentLikes = leaderboardType === 'daily' ? currentUserProfile.daily_likes :
+                        leaderboardType === 'weekly' ? currentUserProfile.weekly_likes :
+                        currentUserProfile.total_likes
+    const topLikes = leaderboardType === 'daily' ? topProfile.daily_likes :
+                    leaderboardType === 'weekly' ? topProfile.weekly_likes :
+                    topProfile.total_likes
+    
+    if (currentUserRank > 10) {
+      const tenthProfile = leaderboardData[9]
+      const tenthLikes = leaderboardType === 'daily' ? tenthProfile.daily_likes :
+                        leaderboardType === 'weekly' ? tenthProfile.weekly_likes :
+                        tenthProfile.total_likes
+      const needed = tenthLikes - currentLikes + 1
+      return { text: `🎯 ${needed} more likes to reach Top 10!`, progress: (currentLikes / tenthLikes) * 100 }
+    }
+    
+    if (currentUserRank > 1) {
+      const needed = topLikes - currentLikes + 1
+      return { text: `🔥 Get ${needed} more to dethrone #1!`, progress: (currentLikes / topLikes) * 100 }
+    }
+    
     return null
   }
 
@@ -3551,12 +3653,46 @@ export default function App() {
                   🏆 Leaderboard
                 </h2>
                 <p className="text-sm md:text-base text-gray-600">Most liked profiles on Anurag Connect</p>
+                
+                {/* Countdown Timer */}
+                {(leaderboardType === 'daily' || leaderboardType === 'weekly') && (
+                  <div className="mt-4 inline-block bg-gradient-to-r from-orange-100 to-red-100 px-4 py-2 rounded-full border-2 border-orange-300">
+                    <p className="text-sm md:text-base font-bold text-orange-700">
+                      ⏰ {leaderboardType === 'daily' ? 'Daily' : 'Weekly'} reset in {countdown.hours}h {countdown.minutes}m {countdown.seconds}s
+                    </p>
+                    <p className="text-xs text-orange-600 mt-1">🏆 Top 3 get featured on Instagram story!</p>
+                  </div>
+                )}
               </div>
 
-              {/* Refresh Button Only */}
-              <div className="flex justify-center items-center gap-3 md:gap-4 mb-6 md:mb-8">
+              {/* Type Tabs and Refresh */}
+              <div className="flex flex-wrap justify-center items-center gap-2 md:gap-3 mb-6 md:mb-8">
+                <Button
+                  onClick={() => loadLeaderboard('daily')}
+                  variant={leaderboardType === 'daily' ? 'default' : 'outline'}
+                  className={leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white' : 'text-sm'}
+                  disabled={loadingLeaderboard}
+                >
+                  🔥 Daily
+                </Button>
+                <Button
+                  onClick={() => loadLeaderboard('weekly')}
+                  variant={leaderboardType === 'weekly' ? 'default' : 'outline'}
+                  className={leaderboardType === 'weekly' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' : 'text-sm'}
+                  disabled={loadingLeaderboard}
+                >
+                  ⭐ Weekly
+                </Button>
                 <Button
                   onClick={() => loadLeaderboard('alltime')}
+                  variant={leaderboardType === 'alltime' ? 'default' : 'outline'}
+                  className={leaderboardType === 'alltime' ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white' : 'text-sm'}
+                  disabled={loadingLeaderboard}
+                >
+                  👑 All Time
+                </Button>
+                <Button
+                  onClick={() => loadLeaderboard(leaderboardType)}
                   variant="outline"
                   className="text-sm"
                   disabled={loadingLeaderboard}
@@ -3579,10 +3715,34 @@ export default function App() {
                   </div>
                 </Card>
               ) : (
-                <div className="space-y-4">
+                <>
+                  {/* Achievement Progress Banner for Current User */}
+                  {(() => {
+                    const currentUserRankIndex = leaderboardData.findIndex(p => p.id === currentUser?.id)
+                    const currentUserRank = currentUserRankIndex >= 0 ? currentUserRankIndex + 1 : null
+                    const achievement = getAchievementProgress(currentUserRank, leaderboardData[0])
+                    
+                    return achievement && (
+                      <div className="mb-6 bg-gradient-to-r from-purple-100 via-pink-100 to-orange-100 border-2 border-purple-300 rounded-xl p-4 animate-pulse">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-sm md:text-base font-bold text-purple-800">{achievement.text}</p>
+                          <span className="text-sm font-semibold text-purple-600">Your Rank: #{currentUserRank}</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                          <div 
+                            className="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full transition-all duration-500"
+                            style={{ width: `${Math.min(achievement.progress, 100)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                  
+                  <div className="space-y-4">
                   {leaderboardData.map((profile, index) => {
                     const rank = index + 1
                     const badge = getBadge(profile, rank)
+                    const positionChange = getPositionChange(profile.id, rank)
                     const likesCount = leaderboardType === 'daily' ? profile.daily_likes :
                                      leaderboardType === 'weekly' ? profile.weekly_likes :
                                      profile.total_likes
@@ -3598,11 +3758,24 @@ export default function App() {
                       >
                         <CardContent className="p-3 md:p-6">
                           <div className="flex items-start md:items-center gap-2 md:gap-6">
-                            {/* Rank Badge */}
-                            <div className={`flex-shrink-0 ${
-                              rank === 1 ? 'text-3xl md:text-6xl' : rank === 2 ? 'text-2xl md:text-5xl' : rank === 3 ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'
-                            }`}>
-                              {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
+                            {/* Rank Badge with Position Change */}
+                            <div className="flex-shrink-0 flex flex-col items-center">
+                              <div className={`${
+                                rank === 1 ? 'text-3xl md:text-6xl' : rank === 2 ? 'text-2xl md:text-5xl' : rank === 3 ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'
+                              }`}>
+                                {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
+                              </div>
+                              {positionChange && (
+                                <div className={`flex items-center gap-0.5 text-xs md:text-sm ${positionChange.color} font-bold mt-1`}>
+                                  <span>{positionChange.emoji}</span>
+                                  <span>{positionChange.text}</span>
+                                </div>
+                              )}
+                              {positionChange?.label && (
+                                <Badge className="mt-1 text-[8px] md:text-xs bg-green-100 text-green-700 border-green-400 px-1 py-0">
+                                  {positionChange.label}
+                                </Badge>
+                              )}
                             </div>
 
                             {/* Profile Photo */}
@@ -3620,15 +3793,15 @@ export default function App() {
 
                             {/* Profile Info */}
                             <div className="flex-1 min-w-0">
-                              {/* Name and Badge - Badge shows on Desktop only */}
-                              <div className="flex items-center gap-1.5 mb-0.5">
+                              {/* Name and Badge - Enhanced badges */}
+                              <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                                 <h3 className={`font-bold ${
                                   rank === 1 ? 'text-sm md:text-2xl' : rank === 2 || rank === 3 ? 'text-sm md:text-xl' : 'text-xs md:text-lg'
                                 } text-gray-900`}>
                                   {profile.name}
                                 </h3>
                                 {badge && (
-                                  <Badge className={`hidden md:inline-flex ${badge.color} bg-opacity-20 text-xs px-1.5 py-0.5`}>
+                                  <Badge className={`hidden md:inline-flex ${badge.color} border-2 text-xs px-2 py-0.5 font-bold`}>
                                     {badge.emoji} {badge.text}
                                   </Badge>
                                 )}
@@ -3648,9 +3821,9 @@ export default function App() {
 
                               {/* Mobile Layout - Badge, Stats and View Button Below */}
                               <div className="md:hidden mt-2 space-y-1.5">
-                                {/* Badge on Mobile */}
+                                {/* Badge on Mobile - Enhanced */}
                                 {badge && (
-                                  <Badge className={`${badge.color} bg-opacity-20 text-[9px] px-1.5 py-0.5 inline-flex`}>
+                                  <Badge className={`${badge.color} border-2 text-[9px] px-2 py-0.5 inline-flex font-bold`}>
                                     {badge.emoji} {badge.text}
                                   </Badge>
                                 )}
@@ -3712,6 +3885,7 @@ export default function App() {
                     )
                   })}
                 </div>
+                </>
               )}
 
               {/* Motivational Message */}

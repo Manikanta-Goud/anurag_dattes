@@ -1869,11 +1869,49 @@ async function handleDeleteEvent(request) {
   }
 }
 
+// Leaderboard Routes
+async function handleGetLeaderboard(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const type = searchParams.get('type') || 'daily'
+    const limit = parseInt(searchParams.get('limit') || '20')
+
+    let orderColumn = 'total_likes'
+    if (type === 'daily') orderColumn = 'daily_likes'
+    if (type === 'weekly') orderColumn = 'weekly_likes'
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, name, email, profile_picture, branch, year, bio, interests, daily_likes, weekly_likes, total_likes, profile_views')
+      .gt(orderColumn, 0) // Only get profiles with likes > 0
+      .order(orderColumn, { ascending: false })
+      .limit(limit)
+
+    if (error) throw error
+
+    // Map to frontend format
+    const leaderboard = (data || []).map(profile => ({
+      ...profile,
+      photo_url: profile.profile_picture,
+      department: profile.branch
+    }))
+
+    return NextResponse.json({ leaderboard })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
 
-  if (pathname.includes('/api/events')) {
+  if (pathname.includes('/api/leaderboard')) {
+    return handleGetLeaderboard(request)
+  } else if (pathname.includes('/api/events')) {
     return handleGetEvents(request)
   } else if (pathname.includes('/api/profiles')) {
     return handleGetProfiles(request)
