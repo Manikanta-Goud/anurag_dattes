@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useUser, useClerk } from '@clerk/nextjs'
 import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,10 +15,13 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 
 export default function App() {
+  // Clerk authentication
+  const { isSignedIn, user, isLoaded } = useUser()
+  const { signOut } = useClerk()
+  
   const [currentUser, setCurrentUser] = useState(null)
-  const [view, setView] = useState('landing') // landing, auth, profile-setup, main, profile, welcome
-  const [authMode, setAuthMode] = useState('login') // login, signup
-  const [showWelcomeScreen, setShowWelcomeScreen] = useState(true) // Show welcome screen after login
+  const [view, setView] = useState('landing') // landing, profile-setup, main, profile
+  const [showWelcomeScreen, setShowWelcomeScreen] = useState(false) // Welcome screen for returning users
   const [mainNav, setMainNav] = useState('home') // home, events, etc. - main navigation sections
   const [profiles, setProfiles] = useState([])
   const [matches, setMatches] = useState([])
@@ -86,19 +90,12 @@ export default function App() {
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true) // Control auto-scroll behavior
 
-  // Auth form state
-  const [authForm, setAuthForm] = useState({
-    email: '',
-    password: '',
-    name: ''
-  })
-
   // Profile form state
   const [profileForm, setProfileForm] = useState({
     name: '',
     bio: '',
     age: 18,
-    gender: 'prefer_not_to_say',
+    gender: 'Other',
     location: '',
     instagram: '',
     interests: '',
@@ -106,22 +103,64 @@ export default function App() {
     photo_url: ''
   })
 
+  // Clerk authentication - check if user is signed in and load their profile
   useEffect(() => {
-    // Check if user is logged in
-    const user = localStorage.getItem('currentUser')
-    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome')
-    if (user) {
-      setCurrentUser(JSON.parse(user))
-      setView('main')
-      // Show welcome screen only if user hasn't seen it in this session
-      setShowWelcomeScreen(!hasSeenWelcome)
-      loadProfiles(JSON.parse(user).id)
-      loadMatches(JSON.parse(user).id)
-      loadFriendRequests(JSON.parse(user).id)
-      loadBlockedUsers(JSON.parse(user).id)
-      loadEvents() // Load events
-    }
+    if (!isLoaded) return // Wait for Clerk to load
     
+    if (isSignedIn && user) {
+      // User is authenticated with Clerk
+      checkOrCreateProfile()
+    } else {
+      // User not signed in - show landing
+      setView('landing')
+      setCurrentUser(null)
+    }
+  }, [isSignedIn, user, isLoaded])
+  
+  // Check if user profile exists in Supabase, if not create it
+  const checkOrCreateProfile = async () => {
+    try {
+      const clerkUserId = user.id
+      const emailAddress = user.emailAddresses[0]?.emailAddress || ''
+      const firstName = user.firstName || ''
+      
+      // Check if profile exists using Clerk user ID
+      const response = await fetch(`/api/profile-by-clerk?clerkUserId=${clerkUserId}`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        if (data.profile) {
+          // Profile exists - load it
+          console.log('✅ Profile found for Clerk user:', data.profile)
+          setCurrentUser(data.profile)
+          setView('main')
+          loadProfiles(data.profile.id)
+          loadMatches(data.profile.id)
+          loadFriendRequests(data.profile.id)
+          loadBlockedUsers(data.profile.id)
+          loadEvents()
+        } else {
+          // Profile doesn't exist - pre-fill form with Clerk data
+          console.log('❌ No profile found - showing setup page')
+          setProfileForm({
+            ...profileForm,
+            name: firstName,
+            email: emailAddress
+          })
+          setView('profile-setup')
+        }
+      } else {
+        // Error fetching - show profile setup
+        console.error('Error fetching profile:', response.status)
+        setView('profile-setup')
+      }
+    } catch (error) {
+      console.error('Error checking profile:', error)
+      setView('profile-setup')
+    }
+  }
+  
+  useEffect(() => {
     // Auto-refresh events every 10 seconds
     const interval = setInterval(() => {
       loadEvents()
@@ -512,136 +551,41 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [view, currentProfileIndex, profiles])
 
-  const handleAuth = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      // Validate College ID Format
-      const validateCollegeId = (email) => {
-        // Must end with @anurag.edu.in
-        if (!email.endsWith('@anurag.edu.in')) {
-          return {
-            valid: false,
-            message: 'Please login with your college ID: id@anurag.edu.in'
-          }
-        }
-
-        // Extract ID part (before @)
-        const idPart = email.split('@')[0]
-
-        // College ID Format: YYegDDDSRR
-        // YY = batch year (2 digits)
-        // eg = fixed letters
-        // DDD = any 3-digit department code (e.g., 105, 206, 305, 449, 505)
-        // S = section (single letter a-z)
-        // RR = roll number (2 digits)
-        const collegeIdPattern = /^(\d{2})(eg)(\d{3})([a-z])(\d{2})$/i
-
-        const match = idPart.match(collegeIdPattern)
-
-        if (!match) {
-          return {
-            valid: false,
-            message: 'Invalid College ID format! Use format: your_rollnumber@anurag.edu.in'
-          }
-        }
-
-        const [, batchYear, eg, deptCode, section, rollNo] = match
-
-        // Additional validations
-        const currentYear = new Date().getFullYear() % 100 // Last 2 digits of current year
-        const batchNum = parseInt(batchYear)
-
-        // Batch year should be reasonable (not more than 10 years old, not future)
-        if (batchNum > currentYear || batchNum < currentYear - 10) {
-          return {
-            valid: false,
-            message: `Invalid batch year: ${batchYear}. Must be between ${currentYear - 10} and ${currentYear}`
-          }
-        }
-
-        // Roll number should be 01-99 (not 00)
-        if (parseInt(rollNo) === 0) {
-          return {
-            valid: false,
-            message: 'Invalid roll number. Roll number must be between 01 and 99'
-          }
-        }
-
-        return { valid: true }
-      }
-
-      const validation = validateCollegeId(authForm.email)
-      if (!validation.valid) {
-        toast.error(validation.message, { duration: 5000 })
-        setLoading(false)
-        return
-      }
-
-      if (authMode === 'signup') {
-        const response = await fetch('/api/auth/signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(authForm)
-        })
-
-        const data = await response.json()
-
-        if (response.ok) {
-          toast.success('Account created! Please complete your profile.')
-          setCurrentUser(data.user)
-          localStorage.setItem('currentUser', JSON.stringify(data.user))
-          setProfileForm({ ...profileForm, name: authForm.name })
-          setView('profile-setup')
-        } else {
-          if (data.error?.includes('already exists') || data.error?.includes('duplicate') || data.error?.includes('already registered')) {
-            toast.error('⚠️ This email is already registered! Please login instead.', { duration: 5000 })
-          } else if (data.error?.includes('security purposes') || data.error?.includes('rate limit')) {
-            toast.error('⏳ Please wait a moment before trying again (rate limit protection)', { duration: 6000 })
-          } else {
-            toast.error(data.error || 'Signup failed')
-          }
-        }
-      } else {
-        const response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: authForm.email, password: authForm.password })
-        })
-
-        const data = await response.json()
-
-        if (response.ok) {
-          console.log('✅ Login successful! User data:', data.user)
-          console.log('📋 Full profile:', JSON.stringify(data.user, null, 2))
-          toast.success('Welcome back!')
-          setCurrentUser(data.user)
-          localStorage.setItem('currentUser', JSON.stringify(data.user))
-          setShowWelcomeScreen(true) // Show welcome screen first
-          setView('main')
-          loadProfiles(data.user.id)
-          loadMatches(data.user.id)
-        } else {
-          if (data.error?.includes('not found')) {
-            toast.error('❌ Account not found! Please signup first.', { duration: 5000 })
-          } else {
-            toast.error(data.error || 'Login failed')
-          }
-        }
-      }
-    } catch (error) {
-      toast.error('Something went wrong!')
-    }
-
-    setLoading(false)
-  }
-
   const handleProfileSetup = async (e) => {
     e.preventDefault()
     setLoading(true)
 
     try {
+      let profileId = currentUser?.id
+      
+      // For new Clerk users, create profile first
+      if (!currentUser && user) {
+        console.log('🔨 Creating new profile for Clerk user')
+        
+        const createResponse = await fetch('/api/create-profile-clerk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clerkUserId: user.id,
+            email: user.emailAddresses[0]?.emailAddress || '',
+            name: profileForm.name || user.firstName || ''
+          })
+        })
+
+        const createData = await createResponse.json()
+
+        if (!createResponse.ok) {
+          toast.error(createData.error || 'Failed to create profile')
+          setLoading(false)
+          return
+        }
+
+        // Set the newly created profile as current user
+        setCurrentUser(createData.profile)
+        profileId = createData.profile.id
+        console.log('✅ Profile created:', createData.profile.id)
+      }
+
       // Upload photo if it's a base64 preview
       let profilePictureUrl = ''
       if (profileForm.photo_url && !profileForm.photo_url.startsWith('http')) {
@@ -668,14 +612,14 @@ export default function App() {
       
       toast.loading('Updating profile...', { id: 'setup-profile' })
       const response = await fetch('/api/profiles', {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: currentUser.id,
+          userId: profileId,
           name: profileForm.name,
           bio: profileForm.bio || '',
           age: parseInt(profileForm.age) || 18,
-          gender: profileForm.gender || 'prefer_not_to_say',
+          gender: profileForm.gender || 'Other',
           location: profileForm.location || '',
           instagram: profileForm.instagram || '',
           interests: interestsArray,
@@ -688,14 +632,15 @@ export default function App() {
 
       if (response.ok) {
         toast.success('Profile updated successfully!', { id: 'setup-profile' })
-        setCurrentUser({ ...currentUser, ...data.profile })
-        localStorage.setItem('currentUser', JSON.stringify({ ...currentUser, ...data.profile }))
+        const updatedProfile = { ...currentUser, ...data.profile }
+        setCurrentUser(updatedProfile)
         setView('main')
-        loadProfiles(currentUser.id)
+        loadProfiles(profileId)
       } else {
         toast.error(data.error || 'Failed to update profile', { id: 'setup-profile' })
       }
     } catch (error) {
+      console.error('Profile setup error:', error)
       toast.error('Something went wrong!')
     }
 
@@ -1612,8 +1557,8 @@ export default function App() {
     }
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('currentUser')
+  const handleLogout = async () => {
+    await signOut()
     setCurrentUser(null)
     setView('landing')
     toast.success('Logged out successfully')
@@ -1865,7 +1810,7 @@ export default function App() {
       const timestamp = Date.now()
       const randomStr = Math.random().toString(36).substring(7)
       const fileExtension = blob.type.split('/')[1] || 'jpg'
-      const fileName = `profile_${currentUser.id}_${timestamp}_${randomStr}.${fileExtension}`
+      const fileName = `profile_${currentUser?.id || user?.id || 'user'}_${timestamp}_${randomStr}.${fileExtension}`
       console.log('📝 Generated filename:', fileName)
       
       // Upload to Supabase Storage
@@ -1959,14 +1904,15 @@ export default function App() {
               <p className="text-2xl text-gray-600 mb-2">Find Your Campus Match</p>
               <p className="text-lg text-gray-500 mb-8">Exclusive dating platform for Anurag University students</p>
               
-              {/* Get Started Button - Immediately visible without scrolling */}
-              <Button 
-                onClick={() => setView('auth')} 
-                size="lg" 
-                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-12 py-6 text-xl rounded-full shadow-lg hover:shadow-xl transition-all"
-              >
-                Get Started →
-              </Button>
+              {/* Get Started Button - Redirect to Clerk Sign Up */}
+              <a href="/sign-up">
+                <Button 
+                  size="lg" 
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-12 py-6 text-xl rounded-full shadow-lg hover:shadow-xl transition-all"
+                >
+                  Get Started →
+                </Button>
+              </a>
             </div>
 
             {/* College Photos */}
@@ -2025,159 +1971,6 @@ export default function App() {
               </Card>
             </div>
           </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Auth Page
-  if (view === 'auth') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex flex-col items-center justify-center p-4 py-8">
-        {/* Login/Signup Card */}
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <div className="flex items-center justify-center mb-4">
-              <Heart className="h-12 w-12 text-pink-500 fill-pink-500" />
-            </div>
-            <CardTitle className="text-center text-3xl">Anurag Connect</CardTitle>
-            <CardDescription className="text-center">
-              {authMode === 'login' ? 'Welcome back!' : 'Create your account'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleAuth} className="space-y-4">
-              {authMode === 'signup' && (
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Name</label>
-                  <Input
-                    type="text"
-                    placeholder="Your name"
-                    value={authForm.name}
-                    onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
-                    required
-                  />
-                </div>
-              )}
-              <div>
-                <label className="text-sm font-medium mb-2 block">College ID</label>
-                <Input
-                  type="email"
-                  placeholder="your_rollnumber@anurag.edu.in"
-                  value={authForm.email}
-                  onChange={(e) => setAuthForm({ ...authForm, email: e.target.value.toLowerCase() })}
-                  required
-                />
-                {authMode === 'signup' && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Format: YYegDDDSRR@anurag.edu.in (YY=batch, DDD=105/505, S=section, RR=roll no.)
-                  </p>
-                )}
-                {authMode === 'login' && (
-                  <p className="text-xs text-gray-500 mt-1">Use your college ID to login</p>
-                )}
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-2 block">Password</label>
-                <Input
-                  type="password"
-                  placeholder="••••••••"
-                  value={authForm.password}
-                  onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                  required
-                />
-              </div>
-              <Button 
-                type="submit" 
-                className="w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                disabled={loading}
-              >
-                {loading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Sign Up')}
-              </Button>
-            </form>
-
-            <div className="mt-4 text-center">
-              <button
-                onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-                className="text-sm text-purple-600 hover:underline"
-              >
-                {authMode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Login'}
-              </button>
-            </div>
-
-            <div className="mt-4 text-center">
-              <button
-                onClick={() => setView('landing')}
-                className="text-sm text-gray-500 hover:underline"
-              >
-                ← Back to home
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Safety & Community Guidelines */}
-        <div className="w-full max-w-2xl mt-6">
-          <Card className="bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-center gap-3">
-                <div className="bg-gradient-to-br from-red-500 to-orange-600 rounded-full p-2">
-                  <AlertTriangle className="h-5 w-5 text-white" />
-                </div>
-                <CardTitle className="text-xl bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent">
-                  Safety & Community Guidelines
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-0">
-              {/* Report Abuse */}
-              <div className="bg-white rounded-xl p-3 border-l-4 border-red-500">
-                <h4 className="font-bold text-red-700 text-sm mb-1.5 flex items-center gap-2">
-                  <UserX className="h-4 w-4" />
-                  Report Inappropriate Behavior
-                </h4>
-                <p className="text-xs text-gray-700 leading-relaxed">
-                  If anyone is messaging you in a <strong>bad, violent, or inappropriate manner</strong>, 
-                  please <strong>DM me immediately on Instagram</strong> (@anurag_slines). 
-                  I will take action within <strong>24 hours</strong> and ensure that account is suspended or banned.
-                </p>
-              </div>
-
-              {/* Warning System */}
-              <div className="bg-white rounded-xl p-3 border-l-4 border-orange-500">
-                <h4 className="font-bold text-orange-700 text-sm mb-1.5 flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  Warning System
-                </h4>
-                <ul className="text-xs text-gray-700 space-y-1">
-                  <li className="flex items-start gap-2">
-                    <span className="text-orange-600 font-bold mt-0.5">1.</span>
-                    <span>First-time violators will receive a <strong>warning notification</strong></span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-orange-600 font-bold mt-0.5">2.</span>
-                    <span>After <strong>5 warnings</strong>, the account will be <strong>permanently banned</strong></span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-orange-600 font-bold mt-0.5">3.</span>
-                    <span>Severe violations may result in <strong>immediate ban</strong> without warnings</span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Be Respectful */}
-              <div className="bg-white rounded-xl p-3 border-l-4 border-green-500">
-                <h4 className="font-bold text-green-700 text-sm mb-1.5 flex items-center gap-2">
-                  <Heart className="h-4 w-4" />
-                  Be Respectful & Kind
-                </h4>
-                <p className="text-xs text-gray-700 leading-relaxed">
-                  This platform is for making genuine connections. Please treat everyone with respect and kindness. 
-                  Let's build a positive community together! 💖
-                </p>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     )

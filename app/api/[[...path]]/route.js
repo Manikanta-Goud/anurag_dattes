@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase, supabaseAdmin } from '../../../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
+import { clerkClient } from '@clerk/nextjs/server'
 
 // In-memory store for online users (in production, use Redis)
 const onlineUsers = new Map() // userId -> lastSeen timestamp
@@ -253,6 +254,59 @@ async function handleLogin(request) {
 }
 
 // Profile Routes
+async function handleGetProfileByClerkId(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const clerkUserId = searchParams.get('clerkUserId')
+
+    if (!clerkUserId) {
+      return NextResponse.json(
+        { error: 'Clerk User ID required' },
+        { status: 400 }
+      )
+    }
+
+    console.log('🔍 Fetching profile for Clerk user:', clerkUserId)
+
+    // Get profile by clerk_user_id
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('clerk_user_id', clerkUserId)
+      .single()
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = not found
+      console.error('❌ Get profile by Clerk ID error:', error)
+      return NextResponse.json(
+        { error: 'Failed to fetch profile' },
+        { status: 500 }
+      )
+    }
+
+    if (!profile) {
+      console.log('❌ No profile found for Clerk user:', clerkUserId)
+      return NextResponse.json({ profile: null })
+    }
+
+    console.log('✅ Found profile:', profile.id)
+    
+    // Map profile_picture to photo_url for frontend compatibility
+    const profileWithPhotoUrl = {
+      ...profile,
+      photo_url: profile.profile_picture,
+      department: profile.branch
+    }
+
+    return NextResponse.json({ profile: profileWithPhotoUrl })
+  } catch (error) {
+    console.error('❌ Get profile by Clerk ID error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
 async function handleGetProfiles(request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -294,6 +348,138 @@ async function handleGetProfiles(request) {
     return NextResponse.json({ profiles: profilesWithPhotoUrl || [] })
   } catch (error) {
     console.error('❌ Get profiles error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleCreateProfileFromClerk(request) {
+  try {
+    const body = await request.json()
+    const { clerkUserId, email, name } = body
+
+    console.log('🔨 Creating profile for Clerk user:', clerkUserId, email)
+
+    // Check if email is permanently banned
+    const { data: bannedUser } = await supabase
+      .from('banned_users')
+      .select('*')
+      .eq('email', email)
+      .eq('is_permanent', true)
+      .single()
+
+    if (bannedUser) {
+      console.log('🚫 Permanently banned user tried to sign up:', email)
+      
+      // Delete the Clerk account immediately
+      try {
+        const client = await clerkClient()
+        await client.users.deleteUser(clerkUserId)
+        console.log('✅ Deleted banned user from Clerk:', clerkUserId)
+      } catch (clerkError) {
+        console.error('⚠️ Failed to delete from Clerk:', clerkError.message)
+      }
+
+      return NextResponse.json(
+        { error: 'This account has been permanently banned and cannot be used. Contact admin for details.' },
+        { status: 403 }
+      )
+    }
+
+    // Extract roll number from email
+    const rollNumber = email.split('@')[0]
+    
+    // Extract branch from roll number (YYegDDDSRR format)
+    const branchMatch = rollNumber.match(/\d{2}([a-z]{2})\d{3}/i)
+    const branch = branchMatch ? branchMatch[1].toUpperCase() : 'UNKNOWN'
+    
+    // Extract year from roll number
+    const yearPrefix = parseInt(rollNumber.substring(0, 2))
+    const currentYear = new Date().getFullYear() % 100
+    const yearDiff = currentYear - yearPrefix
+    const academicYear = yearDiff >= 0 && yearDiff <= 4 ? yearDiff + 1 : 1
+
+    // Check if profile already exists with this email (from old Supabase auth)
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .single()
+
+    if (existingProfile) {
+      console.log('✅ Profile already exists, updating with Clerk user ID:', existingProfile.id)
+      
+      // Update existing profile with Clerk user ID
+      const { data: updatedProfile, error: updateError } = await supabaseAdmin
+        .from('profiles')
+        .update({
+          clerk_user_id: clerkUserId,
+          is_verified: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingProfile.id)
+        .select()
+        .single()
+
+      if (updateError) {
+        console.error('Profile update error:', updateError)
+        return NextResponse.json(
+          { error: `Failed to update profile: ${updateError.message}` },
+          { status: 500 }
+        )
+      }
+
+      // Map profile_picture to photo_url for frontend compatibility
+      const profileWithPhotoUrl = {
+        ...updatedProfile,
+        photo_url: updatedProfile.profile_picture,
+        department: updatedProfile.branch
+      }
+
+      return NextResponse.json({ profile: profileWithPhotoUrl })
+    }
+
+    // Create new profile entry with Clerk user ID
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .insert([{
+        id: uuidv4(), // Generate new UUID for profile ID
+        clerk_user_id: clerkUserId, // Store Clerk user ID
+        email,
+        name,
+        roll_number: rollNumber,
+        branch: branch,
+        year: academicYear,
+        gender: 'Other',
+        age: 18,
+        is_verified: true, // Clerk handles email verification
+        is_active: true
+      }])
+      .select()
+      .single()
+
+    if (profileError) {
+      console.error('Profile creation error:', profileError)
+      return NextResponse.json(
+        { error: `Failed to create profile: ${profileError.message}` },
+        { status: 500 }
+      )
+    }
+
+    console.log('✅ Profile created successfully:', profile.id)
+
+    // Map profile_picture to photo_url for frontend compatibility
+    const profileWithPhotoUrl = {
+      ...profile,
+      photo_url: profile.profile_picture,
+      department: profile.branch
+    }
+
+    return NextResponse.json({ profile: profileWithPhotoUrl })
+  } catch (error) {
+    console.error('Create profile from Clerk error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -1285,41 +1471,89 @@ async function handleDeleteUser(request) {
       )
     }
 
+    // Get user's clerk_user_id and email before deleting
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('clerk_user_id, email, name')
+      .eq('id', userId)
+      .single()
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    console.log('🗑️ Deleting user:', profile.name, profile.email)
+
+    // Remove from online users
     onlineUsers.delete(userId)
 
-    // FIXED: Use correct column names
+    // Delete all related data from Supabase using ADMIN client
     // Warnings
-    await supabase.from('warnings').delete().eq('user_id', userId)
+    await supabaseAdmin.from('warnings').delete().eq('user_id', userId)
 
     // Messages
-    await supabase.from('messages').delete().or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+    await supabaseAdmin.from('messages').delete().or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
 
     // Matches
-    await supabase.from('matches').delete().or(`user1Id.eq.${userId},user2Id.eq.${userId}`)
+    await supabaseAdmin.from('matches').delete().or(`user1id.eq.${userId},user2id.eq.${userId}`)
 
     // Likes
-    await supabase.from('likes').delete().or(`liker_id.eq.${userId},liked_id.eq.${userId}`)
+    await supabaseAdmin.from('likes').delete().or(`liker_id.eq.${userId},liked_id.eq.${userId}`)
 
     // Blocked users
-    await supabase.from('blocked_users').delete().or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`)
-
-    // Ban records
-    await supabase.from('banned_users').delete().eq('user_id', userId)
+    await supabaseAdmin.from('blocked_users').delete().or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`)
 
     // Friend requests
-    await supabase.from('friend_requests').delete().or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+    await supabaseAdmin.from('friend_requests').delete().or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
 
-    // Profile
-    const { error } = await supabase
+    // Add to permanent ban list BEFORE deleting profile
+    if (profile?.email) {
+      await supabaseAdmin
+        .from('banned_users')
+        .upsert({
+          userid: userId,
+          email: profile.email,
+          name: profile.name || 'Unknown',
+          reason: 'Account permanently deleted by admin',
+          bannedby: 'admin',
+          bannedat: new Date().toISOString(),
+          is_permanent: true, // Mark as permanent ban
+          isactive: true
+        })
+    }
+
+    // Delete profile from Supabase using ADMIN client
+    const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .delete()
       .eq('id', userId)
 
-    if (error) throw error
+    if (profileError) {
+      console.error('❌ Profile deletion error:', profileError)
+      throw profileError
+    }
+
+    console.log('✅ Deleted profile from Supabase:', userId)
+
+    // Delete from Clerk if they have a Clerk account
+    if (profile?.clerk_user_id) {
+      try {
+        const client = await clerkClient()
+        await client.users.deleteUser(profile.clerk_user_id)
+        console.log('✅ Deleted user from Clerk:', profile.clerk_user_id)
+      } catch (clerkError) {
+        console.error('⚠️ Failed to delete from Clerk:', clerkError.message)
+        // Continue even if Clerk deletion fails - Supabase data is already deleted
+      }
+    }
 
     return NextResponse.json({
       success: true,
-      message: 'User and all related data deleted permanently'
+      message: 'User permanently deleted from database and Clerk. They cannot login again.',
+      deletedEmail: profile?.email
     })
   } catch (error) {
     return NextResponse.json(
@@ -1965,6 +2199,8 @@ export async function GET(request) {
     return handleGetLeaderboard(request)
   } else if (pathname.includes('/api/events')) {
     return handleGetEvents(request)
+  } else if (pathname.includes('/api/profile-by-clerk')) {
+    return handleGetProfileByClerkId(request)
   } else if (pathname.includes('/api/profiles')) {
     return handleGetProfiles(request)
   } else if (pathname.includes('/api/matches')) {
@@ -2005,6 +2241,8 @@ export async function POST(request) {
     return handleCreateEvent(request)
   } else if (pathname.includes('/api/events/update')) {
     return handleUpdateEvent(request)
+  } else if (pathname.includes('/api/create-profile-clerk')) {
+    return handleCreateProfileFromClerk(request)
   } else if (pathname.includes('/api/auth/signup')) {
     return handleSignup(request)
   } else if (pathname.includes('/api/auth/login')) {

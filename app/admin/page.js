@@ -356,11 +356,17 @@ export default function AdminPanel() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success(`✅ ${selectedUserProfile.name} has been permanently deleted!`, { id: loadingToast })
+        toast.success(`✅ ${selectedUserProfile.name} has been permanently deleted from Supabase and Clerk!`, { id: loadingToast })
+        
+        // Remove deleted user from state immediately
+        setUsers(prevUsers => prevUsers.filter(u => u.id !== selectedUserProfile.id))
+        
         closeDeleteModal()
         closeUserProfile()
         closeBanModal()
-        loadAdminData() // Refresh all data
+        
+        // Refresh all data to ensure everything is up to date
+        setTimeout(() => loadAdminData(), 500)
       } else {
         toast.error(data.error || 'Failed to delete user', { id: loadingToast })
       }
@@ -583,8 +589,21 @@ export default function AdminPanel() {
                               <Mail className="h-3 w-3" />
                               {user.email}
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              {user.department} • {user.year} Year • Joined {new Date(user.createdAt).toLocaleDateString()}
+                            <div className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                              <span>{user.department} • {user.year} Year • Joined {new Date(user.createdAt).toLocaleDateString()}</span>
+                              {user.clerk_user_id && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-300">
+                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                  </svg>
+                                  Clerk
+                                </span>
+                              )}
+                              {!user.clerk_user_id && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-300">
+                                  Old Auth
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
