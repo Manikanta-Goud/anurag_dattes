@@ -75,6 +75,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('discover')
   const [countdown, setCountdown] = useState({ hours: 0, minutes: 0, seconds: 0 })
   const [previousRanks, setPreviousRanks] = useState({}) // Track previous ranks for arrows
+  const [showBonusModal, setShowBonusModal] = useState(false)
+  const [bonusLikesRemaining, setBonusLikesRemaining] = useState(0)
+  const [bonusExpiry, setBonusExpiry] = useState(null)
 
   // Scroll tracking state
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
@@ -956,7 +959,7 @@ export default function App() {
     }
   }
 
-  // Countdown timer effect
+  // Countdown timer effect with bonus reward
   useEffect(() => {
     const updateCountdown = () => {
       const now = new Date()
@@ -979,6 +982,26 @@ export default function App() {
         const hours = Math.floor(diff / (1000 * 60 * 60))
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
         const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+        
+        // Check if timer just hit 0 (within 1 second window)
+        if (hours === 0 && minutes === 0 && seconds <= 1 && seconds >= 0) {
+          // Check if we haven't already given bonus in last 15 minutes
+          const lastBonusKey = `lastBonus_${leaderboardType}`
+          const lastBonus = localStorage.getItem(lastBonusKey)
+          const shouldShowBonus = !lastBonus || (now - new Date(lastBonus)) > 15 * 60 * 1000
+          
+          if (shouldShowBonus) {
+            // Give 3 bonus likes valid for 10 minutes
+            const expiry = new Date(now.getTime() + 10 * 60 * 1000)
+            setBonusLikesRemaining(3)
+            setBonusExpiry(expiry)
+            setShowBonusModal(true)
+            localStorage.setItem(lastBonusKey, now.toISOString())
+            localStorage.setItem('bonusLikes', '3')
+            localStorage.setItem('bonusExpiry', expiry.toISOString())
+          }
+        }
+        
         setCountdown({ hours, minutes, seconds })
       }
     }
@@ -987,6 +1010,45 @@ export default function App() {
     const interval = setInterval(updateCountdown, 1000)
     return () => clearInterval(interval)
   }, [leaderboardType])
+  
+  // Check and restore bonus likes from localStorage on mount
+  useEffect(() => {
+    const storedBonusLikes = localStorage.getItem('bonusLikes')
+    const storedExpiry = localStorage.getItem('bonusExpiry')
+    
+    if (storedBonusLikes && storedExpiry) {
+      const expiry = new Date(storedExpiry)
+      const now = new Date()
+      
+      if (expiry > now) {
+        // Bonus still valid
+        setBonusLikesRemaining(parseInt(storedBonusLikes))
+        setBonusExpiry(expiry)
+      } else {
+        // Expired, clear it
+        localStorage.removeItem('bonusLikes')
+        localStorage.removeItem('bonusExpiry')
+      }
+    }
+  }, [])
+  
+  // Bonus expiry countdown
+  useEffect(() => {
+    if (!bonusExpiry) return
+    
+    const checkExpiry = () => {
+      const now = new Date()
+      if (now >= bonusExpiry) {
+        setBonusLikesRemaining(0)
+        setBonusExpiry(null)
+        localStorage.removeItem('bonusLikes')
+        localStorage.removeItem('bonusExpiry')
+      }
+    }
+    
+    const interval = setInterval(checkExpiry, 1000)
+    return () => clearInterval(interval)
+  }, [bonusExpiry])
 
   const getBadge = (profile, rank) => {
     // Scarcity badges - only limited spots get special badges
@@ -1076,7 +1138,17 @@ export default function App() {
       sendingRequestsRef.current.add(receiverId)
       setSendingRequest(true)
       setLikedProfiles(prev => new Set(prev).add(receiverId))
-      toast.success('Friend request sent! 🚀', { duration: 2000 })
+      
+      // Check if using bonus likes
+      if (bonusLikesRemaining > 0 && bonusExpiry && new Date() < bonusExpiry) {
+        // Use bonus like
+        const newBonus = bonusLikesRemaining - 1
+        setBonusLikesRemaining(newBonus)
+        localStorage.setItem('bonusLikes', newBonus.toString())
+        toast.success(`💎 Bonus like used! ${newBonus} remaining 🚀`, { duration: 2000 })
+      } else {
+        toast.success('Friend request sent! 🚀', { duration: 2000 })
+      }
 
       // ⚡ Send request in background (non-blocking)
       const response = await fetch('/api/friend-request/send', {
@@ -2788,6 +2860,65 @@ export default function App() {
   // Main App
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 overflow-x-hidden">
+      {/* Bonus Reward Modal */}
+      {showBonusModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="bg-gradient-to-br from-yellow-50 via-orange-50 to-red-50 rounded-3xl shadow-2xl max-w-md w-full p-8 border-4 border-yellow-400 animate-in zoom-in duration-500">
+            <div className="text-center space-y-6">
+              {/* Animated Trophy */}
+              <div className="relative">
+                <div className="text-8xl animate-bounce">🎁</div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-32 h-32 bg-yellow-300/30 rounded-full animate-ping"></div>
+                </div>
+              </div>
+              
+              <div>
+                <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-red-600 mb-2">
+                  BONUS REWARD!
+                </h2>
+                <p className="text-lg font-bold text-gray-800 mb-1">
+                  You got 3 FREE likes! 💎
+                </p>
+                <p className="text-sm text-orange-700 font-semibold">
+                  Valid for next 10 minutes only!
+                </p>
+              </div>
+              
+              {/* Countdown */}
+              <div className="bg-white/80 backdrop-blur rounded-xl p-4 border-2 border-orange-300">
+                <p className="text-xs text-gray-600 mb-2">Expires in:</p>
+                <div className="text-4xl font-black text-orange-600">
+                  {bonusExpiry && (
+                    <>
+                      {Math.floor((bonusExpiry - new Date()) / 60000)}:
+                      {String(Math.floor(((bonusExpiry - new Date()) % 60000) / 1000)).padStart(2, '0')}
+                    </>
+                  )}
+                </div>
+              </div>
+              
+              <button
+                onClick={() => {
+                  setShowBonusModal(false)
+                  setActiveTab('discover') // Take them to discover page
+                }}
+                className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
+              >
+                Use Bonus Likes Now! 🔥
+              </button>
+              
+              <button
+                onClick={() => setShowBonusModal(false)}
+                className="text-sm text-gray-600 hover:text-gray-800 underline"
+              >
+                Maybe later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Header */}
       <div className="bg-white border-b shadow-sm">
         <div className="container mx-auto px-4 py-3 md:py-4">
@@ -2799,6 +2930,19 @@ export default function App() {
               </h1>
             </div>
             <div className="flex items-center gap-1 md:gap-3">
+              {/* Bonus Likes Indicator */}
+              {bonusLikesRemaining > 0 && bonusExpiry && new Date() < bonusExpiry && (
+                <div className="bg-gradient-to-r from-yellow-400 to-orange-400 text-white px-3 py-1.5 rounded-full shadow-lg border-2 border-yellow-300 animate-pulse">
+                  <span className="text-xs md:text-sm font-bold flex items-center gap-1">
+                    <span>💎</span>
+                    <span>{bonusLikesRemaining} Bonus</span>
+                    <span className="hidden md:inline">
+                      • {Math.floor((bonusExpiry - new Date()) / 60000)}:{String(Math.floor(((bonusExpiry - new Date()) % 60000) / 1000)).padStart(2, '0')}
+                    </span>
+                  </span>
+                </div>
+              )}
+              
               {/* Help Button */}
               <button
                 onClick={() => setShowHelpModal(true)}
