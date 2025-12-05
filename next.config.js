@@ -3,6 +3,14 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  env: {
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_cG9wdWxhci1jYWxmLTEuY2xlcmsuYWNjb3VudHMuZGV2JA',
+    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY || 'sk_test_ptGHxaeifudvx86Eq5CSOrhfZk5NgTVbHn6FCtKtl6',
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/sign-in',
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/sign-up',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: '/',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/',
+  },
   experimental: {
     // Remove if not using Server Components
     serverComponentsExternalPackages: ['mongodb'],

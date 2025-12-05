@@ -265,7 +265,7 @@ export default function App() {
         } else {
           console.log('⚠️ Skipping fallback poll - match changed')
         }
-      }, 3000) // Poll every 3 seconds as backup
+      }, 10000) // Poll every 10 seconds as backup (reduced from 3s)
       
       return () => {
         console.log('🔌 Unsubscribing from Realtime for match:', matchId)
@@ -358,8 +358,8 @@ export default function App() {
     
     if (matches.length > 0) {
       checkUnreadMessages()
-      // Check every 3 seconds for new messages
-      const interval = setInterval(checkUnreadMessages, 3000)
+      // Check every 10 seconds for unread count (Realtime handles instant message delivery)
+      const interval = setInterval(checkUnreadMessages, 10000)
       return () => clearInterval(interval)
     }
   }, [matches, currentUser, selectedMatch])
@@ -527,10 +527,10 @@ export default function App() {
   }, [currentUser, view])
 
   useEffect(() => {
-    // Load online users every 10 seconds
+    // Load online users every 30 seconds (not time-critical)
     if (view === 'main') {
       loadOnlineUsers()
-      const interval = setInterval(loadOnlineUsers, 10000)
+      const interval = setInterval(loadOnlineUsers, 30000)
       return () => clearInterval(interval)
     }
   }, [view])
@@ -1220,6 +1220,10 @@ export default function App() {
 
       console.log('✅ Accepting friend request:', { requestId, request })
 
+      // ⚡ OPTIMISTIC UI UPDATE - Remove request immediately for instant feedback
+      setFriendRequests(prev => prev.filter(req => req.id !== requestId))
+      toast.success('Friend request accepted! You can now chat 🎉')
+
       const response = await fetch('/api/friend-request/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1233,17 +1237,24 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success('Friend request accepted! You can now chat 🎉')
-        // Only reload matches, not friend requests (will be removed from UI by caller)
+        // Reload matches to show new chat
         await loadMatches(currentUser.id)
         return true
       } else {
         console.error('❌ Accept error:', data.error)
+        // ⚡ Rollback optimistic update on error - restore the request
+        if (request) {
+          setFriendRequests(prev => [request, ...prev])
+        }
         toast.error(data.error || 'Failed to accept request')
         return false
       }
     } catch (error) {
       console.error('❌ Accept friend request error:', error)
+      // ⚡ Rollback on network error
+      if (request) {
+        setFriendRequests(prev => [request, ...prev])
+      }
       toast.error('Failed to accept friend request')
       return false
     }
@@ -1251,6 +1262,11 @@ export default function App() {
 
   const rejectFriendRequest = async (requestId) => {
     try {
+      // ⚡ OPTIMISTIC UI UPDATE - Remove request immediately for instant feedback
+      const removedRequest = friendRequests.find(req => req.id === requestId)
+      setFriendRequests(prev => prev.filter(req => req.id !== requestId))
+      toast.success('Request rejected')
+
       const response = await fetch('/api/friend-request/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1260,14 +1276,21 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success('Request rejected')
-        // Don't reload list, will be removed from UI by caller
         return true
       } else {
+        // ⚡ Rollback optimistic update on error
+        if (removedRequest) {
+          setFriendRequests(prev => [removedRequest, ...prev])
+        }
         toast.error(data.error || 'Failed to reject request')
         return false
       }
     } catch (error) {
+      // ⚡ Rollback on network error
+      const removedRequest = friendRequests.find(req => req.id === requestId)
+      if (removedRequest) {
+        setFriendRequests(prev => [removedRequest, ...prev])
+      }
       toast.error('Failed to reject request')
       return false
     }
@@ -1534,6 +1557,18 @@ export default function App() {
       })
 
       if (response.ok) {
+        const data = await response.json()
+        
+        // Instantly add message to UI (optimistic update)
+        setMessages(prev => [...prev, {
+          id: data.message.id,
+          matchId: selectedMatch.id,
+          senderId: currentUser.id,
+          message: tempMessage,
+          createdAt: new Date().toISOString(),
+          read: false
+        }])
+        
         // Update the lastMessageTime for this match to move it to the top
         setMatches(prevMatches => {
           return prevMatches.map(match => {
@@ -1546,7 +1581,6 @@ export default function App() {
         
         // Force scroll to bottom when user sends a message
         setShouldAutoScroll(true)
-        loadMessages(selectedMatch.id, true)
       } else {
         toast.error('Failed to send message')
         setMessageInput(tempMessage)
@@ -3037,8 +3071,7 @@ export default function App() {
                           <Button
                             onClick={async () => {
                               await acceptFriendRequest(request)
-                              // Remove from list immediately
-                              setFriendRequests(prev => prev.filter(r => r.id !== request.id))
+                              // Optimistic update handled inside acceptFriendRequest
                             }}
                             size="sm"
                             className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
@@ -3049,8 +3082,7 @@ export default function App() {
                           <Button
                             onClick={async () => {
                               await rejectFriendRequest(request.id)
-                              // Remove from list immediately
-                              setFriendRequests(prev => prev.filter(r => r.id !== request.id))
+                              // Optimistic update handled inside rejectFriendRequest
                             }}
                             size="sm"
                             variant="outline"
