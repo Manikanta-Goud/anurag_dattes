@@ -1882,7 +1882,7 @@ async function handleGetLeaderboard(request) {
 
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, name, email, profile_picture, branch, year, bio, interests, daily_likes, weekly_likes, total_likes, profile_views')
+      .select('id, name, email, profile_picture, branch, year, bio, interests, gender, daily_likes, weekly_likes, total_likes, profile_views')
       .gt(orderColumn, 0) // Only get profiles with likes > 0
       .order(orderColumn, { ascending: false })
       .limit(limit)
@@ -1897,6 +1897,58 @@ async function handleGetLeaderboard(request) {
     }))
 
     return NextResponse.json({ leaderboard })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Claim Bonus Reward
+async function handleClaimBonusReward(request) {
+  try {
+    const body = await request.json()
+    const { userId, rewardType } = body // rewardType: 'daily' or 'weekly'
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
+    // First, get current likes
+    const { data: profile, error: fetchError } = await supabaseAdmin
+      .from('profiles')
+      .select('daily_likes, weekly_likes, total_likes')
+      .eq('id', userId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    // Add 3 likes to user's daily_likes (or weekly_likes)
+    const column = rewardType === 'weekly' ? 'weekly_likes' : 'daily_likes'
+    
+    const updateData = {
+      [column]: (profile[column] || 0) + 3,
+      total_likes: (profile.total_likes || 0) + 3
+    }
+    
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update(updateData)
+      .eq('id', userId)
+      .select('daily_likes, weekly_likes, total_likes')
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json({ 
+      success: true,
+      message: '3 bonus likes added to your profile!',
+      likes: data
+    })
   } catch (error) {
     return NextResponse.json(
       { error: error.message },
@@ -1989,6 +2041,8 @@ export async function POST(request) {
     return handleUnblockUser(request)
   } else if (pathname.includes('/api/remove-friend')) {
     return handleRemoveFriend(request)
+  } else if (pathname.includes('/api/claim-bonus-reward')) {
+    return handleClaimBonusReward(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })

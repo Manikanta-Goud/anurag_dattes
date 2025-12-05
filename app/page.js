@@ -76,8 +76,11 @@ export default function App() {
   const [countdown, setCountdown] = useState({ hours: 0, minutes: 0, seconds: 0 })
   const [previousRanks, setPreviousRanks] = useState({}) // Track previous ranks for arrows
   const [showBonusModal, setShowBonusModal] = useState(false)
-  const [bonusLikesRemaining, setBonusLikesRemaining] = useState(0)
   const [bonusExpiry, setBonusExpiry] = useState(null)
+  const [bonusRewardType, setBonusRewardType] = useState('daily') // Track which leaderboard triggered bonus
+  const [bonusClaimed, setBonusClaimed] = useState(false) // Track if user already claimed
+  const bonusShownRef = useRef(false) // Prevent showing bonus multiple times
+  const targetTimeRef = useRef(null) // Store fixed target time
 
   // Scroll tracking state
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
@@ -140,8 +143,8 @@ export default function App() {
       currentMatchIdRef.current = selectedMatch.id
       console.log('✅ Current match ID set to:', selectedMatch.id)
       
-      setShouldAutoScroll(true) // Enable auto-scroll when opening a chat
-      loadMessages(selectedMatch.id, true) // Force scroll on initial load
+      // Only scroll to bottom on INITIAL load, then never again
+      loadMessages(selectedMatch.id, true) // Force scroll ONLY on initial load
       
       // Subscribe to real-time message updates using Supabase Realtime
       console.log('🔌 Subscribing to Realtime for match:', selectedMatch.id)
@@ -201,15 +204,7 @@ export default function App() {
             })
           })
           
-          // Auto-scroll if at bottom
-          if (shouldAutoScroll) {
-            setTimeout(() => {
-              const chatContainer = document.getElementById('chat-messages')
-              const mobileChatContainer = document.getElementById('mobile-chat-messages')
-              if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight
-              if (mobileChatContainer) mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
-            }, 50)
-          }
+          // NO AUTO-SCROLL - let user control their scroll position
         })
         .subscribe((status) => {
           console.log('📡 Realtime subscription status:', status)
@@ -253,7 +248,7 @@ export default function App() {
   useEffect(() => {
     const handleScroll = (e) => {
       const container = e.target
-      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+      const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50
       setIsUserAtBottom(isAtBottom)
       setShouldAutoScroll(isAtBottom)
     }
@@ -283,6 +278,8 @@ export default function App() {
     const checkUnreadMessages = async () => {
       if (!currentUser || !matches.length) return
       
+      const newUnreadSet = new Set()
+      
       for (const match of matches) {
         // Skip the currently selected match (it's already marked as read)
         if (selectedMatch?.id === match.id) continue
@@ -291,19 +288,32 @@ export default function App() {
           const response = await fetch(`/api/messages?matchId=${match.id}`)
           const data = await response.json()
           if (response.ok && data.messages && data.messages.length > 0) {
-            // Check if there are any messages from the friend (not from current user)
-            const hasNewMessages = data.messages.some(
-              msg => msg.senderId === match.matchedUser?.id && 
-              msg.createdAt > (localStorage.getItem(`lastRead_${match.id}`) || 0)
-            )
+            // Get the last read timestamp for this match
+            const lastReadStr = localStorage.getItem(`lastRead_${match.id}`)
+            const lastReadTime = lastReadStr ? new Date(lastReadStr).getTime() : 0
+            
+            // Check if there are any messages from the friend (not from current user) after last read
+            const hasNewMessages = data.messages.some(msg => {
+              const isFromFriend = msg.senderId === match.matchedUser?.id
+              const messageTime = new Date(msg.createdAt).getTime()
+              const isUnread = messageTime > lastReadTime
+              return isFromFriend && isUnread
+            })
             
             if (hasNewMessages) {
-              setUnreadMessages(prev => new Set(prev).add(match.id))
+              newUnreadSet.add(match.id)
+              console.log('📬 Unread messages from:', match.matchedUser?.name)
             }
           }
         } catch (error) {
           console.error('Failed to check messages:', error)
         }
+      }
+      
+      // Update unread messages state
+      setUnreadMessages(newUnreadSet)
+      if (newUnreadSet.size > 0) {
+        console.log(`🔴 Total unread conversations: ${newUnreadSet.size}`)
       }
     }
     
@@ -781,28 +791,22 @@ export default function App() {
         // Re-sort matches to move this conversation to the top
         sortMatchesByLastMessage()
         
-        // Smart auto-scroll: Only scroll if user is at bottom OR if force scroll OR if new message arrives
-        setTimeout(() => {
-          const chatContainer = document.getElementById('chat-messages')
-          const mobileChatContainer = document.getElementById('mobile-chat-messages')
-          
-          if (chatContainer && (forceScroll || shouldAutoScroll || hasNewMessages)) {
-            // Check if user is already near bottom (within 100px)
-            const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100
+        // ONLY auto-scroll if explicitly requested (forceScroll = true on initial load)
+        // NEVER auto-scroll during polling or updates
+        if (forceScroll) {
+          setTimeout(() => {
+            const chatContainer = document.getElementById('chat-messages')
+            const mobileChatContainer = document.getElementById('mobile-chat-messages')
             
-            if (forceScroll || isNearBottom) {
+            if (chatContainer) {
               chatContainer.scrollTop = chatContainer.scrollHeight
             }
-          }
-          
-          if (mobileChatContainer && (forceScroll || shouldAutoScroll || hasNewMessages)) {
-            const isNearBottom = mobileChatContainer.scrollHeight - mobileChatContainer.scrollTop - mobileChatContainer.clientHeight < 100
             
-            if (forceScroll || isNearBottom) {
+            if (mobileChatContainer) {
               mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
             }
-          }
-        }, 50)
+          }, 100)
+        }
       }
     } catch (error) {
       console.error('Failed to load messages:', error)
@@ -961,21 +965,33 @@ export default function App() {
 
   // Countdown timer effect with bonus reward
   useEffect(() => {
-    const updateCountdown = () => {
+    // Set target time once when component mounts or leaderboard type changes
+    if (!targetTimeRef.current) {
       const now = new Date()
-      let targetTime
       
       if (leaderboardType === 'daily') {
-        // Countdown to midnight
-        targetTime = new Date(now)
-        targetTime.setHours(24, 0, 0, 0)
+        // PRODUCTION: Reset at 12 PM daily
+        const target = new Date(now)
+        target.setHours(12, 0, 0, 0) // Set to 12 PM
+        
+        // If it's already past 12 PM today, set to 12 PM tomorrow
+        if (now >= target) {
+          target.setDate(target.getDate() + 1)
+        }
+        targetTimeRef.current = target
       } else if (leaderboardType === 'weekly') {
-        // Countdown to next Monday
-        targetTime = new Date(now)
+        // Countdown to next Monday at 12 PM
+        const target = new Date(now)
         const daysUntilMonday = (8 - now.getDay()) % 7 || 7
-        targetTime.setDate(now.getDate() + daysUntilMonday)
-        targetTime.setHours(0, 0, 0, 0)
+        target.setDate(now.getDate() + daysUntilMonday)
+        target.setHours(12, 0, 0, 0)
+        targetTimeRef.current = target
       }
+    }
+    
+    const updateCountdown = () => {
+      const now = new Date()
+      const targetTime = targetTimeRef.current
       
       if (targetTime) {
         const diff = targetTime - now
@@ -983,77 +999,151 @@ export default function App() {
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
         const seconds = Math.floor((diff % (1000 * 60)) / 1000)
         
-        // Check if timer just hit 0 (within 1 second window)
-        if (hours === 0 && minutes === 0 && seconds <= 1 && seconds >= 0) {
+        // Check if timer just hit 0 (exactly when it reaches 0 or negative)
+        if (diff <= 0 && !bonusShownRef.current) {
           // Check if we haven't already given bonus in last 15 minutes
           const lastBonusKey = `lastBonus_${leaderboardType}`
           const lastBonus = localStorage.getItem(lastBonusKey)
           const shouldShowBonus = !lastBonus || (now - new Date(lastBonus)) > 15 * 60 * 1000
           
           if (shouldShowBonus) {
-            // Give 3 bonus likes valid for 10 minutes
+            // Show modal with 10 minute expiry for claiming
             const expiry = new Date(now.getTime() + 10 * 60 * 1000)
-            setBonusLikesRemaining(3)
             setBonusExpiry(expiry)
+            setBonusRewardType(leaderboardType)
+            setBonusClaimed(false)
             setShowBonusModal(true)
+            bonusShownRef.current = true // Mark as shown
             localStorage.setItem(lastBonusKey, now.toISOString())
-            localStorage.setItem('bonusLikes', '3')
             localStorage.setItem('bonusExpiry', expiry.toISOString())
+            localStorage.setItem('bonusRewardType', leaderboardType)
           }
         }
         
-        setCountdown({ hours, minutes, seconds })
+        setCountdown({ 
+          hours: Math.max(0, hours), 
+          minutes: Math.max(0, minutes), 
+          seconds: Math.max(0, seconds) 
+        })
       }
     }
     
     updateCountdown()
     const interval = setInterval(updateCountdown, 1000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      bonusShownRef.current = false // Reset when leaderboard type changes
+      targetTimeRef.current = null // Reset target time
+    }
   }, [leaderboardType])
   
-  // Check and restore bonus likes from localStorage on mount
+  // Check and restore bonus expiry from localStorage on mount
   useEffect(() => {
-    const storedBonusLikes = localStorage.getItem('bonusLikes')
+    const now = new Date()
     const storedExpiry = localStorage.getItem('bonusExpiry')
+    const storedRewardType = localStorage.getItem('bonusRewardType')
+    const storedClaimed = localStorage.getItem('bonusClaimed')
     
-    if (storedBonusLikes && storedExpiry) {
+    // First check if there's a stored bonus in progress
+    if (storedExpiry && storedRewardType) {
       const expiry = new Date(storedExpiry)
-      const now = new Date()
       
-      if (expiry > now) {
-        // Bonus still valid
-        setBonusLikesRemaining(parseInt(storedBonusLikes))
+      if (expiry > now && storedClaimed !== 'true') {
+        // Bonus claim window still valid and not yet claimed
         setBonusExpiry(expiry)
-      } else {
+        setBonusRewardType(storedRewardType)
+        setBonusClaimed(false)
+        setShowBonusModal(true) // Show modal again if they refresh
+      } else if (expiry <= now) {
         // Expired, clear it
-        localStorage.removeItem('bonusLikes')
         localStorage.removeItem('bonusExpiry')
+        localStorage.removeItem('bonusRewardType')
+        localStorage.removeItem('bonusClaimed')
+      }
+    } else {
+      // No stored bonus - check if we're within 10 minutes after 12 PM reset time
+      const resetTime = new Date(now)
+      resetTime.setHours(12, 0, 0, 0)
+      
+      // Check if current time is between 12:00 PM and 12:10 PM
+      const timeSinceReset = now - resetTime
+      const isWithinClaimWindow = timeSinceReset >= 0 && timeSinceReset <= 10 * 60 * 1000
+      
+      if (isWithinClaimWindow && storedClaimed !== 'true') {
+        // We're within the 10-minute claim window after 12 PM - show bonus!
+        const expiry = new Date(resetTime.getTime() + 10 * 60 * 1000)
+        setBonusExpiry(expiry)
+        setBonusRewardType('daily')
+        setBonusClaimed(false)
+        setShowBonusModal(true)
+        localStorage.setItem('bonusExpiry', expiry.toISOString())
+        localStorage.setItem('bonusRewardType', 'daily')
       }
     }
   }, [])
   
-  // Bonus expiry countdown
+  // Bonus expiry countdown - close modal when expired
   useEffect(() => {
-    if (!bonusExpiry) return
+    if (!bonusExpiry || bonusClaimed) return
     
     const checkExpiry = () => {
       const now = new Date()
       if (now >= bonusExpiry) {
-        setBonusLikesRemaining(0)
+        setShowBonusModal(false)
         setBonusExpiry(null)
-        localStorage.removeItem('bonusLikes')
         localStorage.removeItem('bonusExpiry')
+        localStorage.removeItem('bonusRewardType')
+        localStorage.removeItem('bonusClaimed')
       }
     }
     
     const interval = setInterval(checkExpiry, 1000)
     return () => clearInterval(interval)
-  }, [bonusExpiry])
+  }, [bonusExpiry, bonusClaimed])
+  
+  // Function to claim bonus reward
+  const claimBonusReward = async () => {
+    try {
+      const response = await fetch('/api/claim-bonus-reward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          rewardType: bonusRewardType
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (response.ok) {
+        setBonusClaimed(true)
+        localStorage.setItem('bonusClaimed', 'true')
+        toast.success('🎉 3 bonus likes added to your profile!', { duration: 3000 })
+        
+        // Reload leaderboard to show updated likes
+        loadLeaderboard(leaderboardType)
+        
+        // Close modal after 2 seconds
+        setTimeout(() => {
+          setShowBonusModal(false)
+        }, 2000)
+      } else {
+        toast.error(data.error || 'Failed to claim bonus')
+      }
+    } catch (error) {
+      toast.error('Failed to claim bonus reward')
+    }
+  }
 
   const getBadge = (profile, rank) => {
     // Scarcity badges - only limited spots get special badges
     if (leaderboardType === 'daily') {
-      if (rank === 1) return { emoji: '👑', text: 'King/Queen of the Day', color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
+      if (rank === 1) {
+        const title = profile.gender === 'male' ? 'King of the Day' : 
+                      profile.gender === 'female' ? 'Queen of the Day' : 
+                      'King/Queen of the Day'
+        return { emoji: '👑', text: title, color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
+      }
       if (rank === 2) return { emoji: '🔥', text: 'Hottest Today', color: 'text-orange-500 bg-orange-100 border-orange-400' }
       if (rank === 3) return { emoji: '🔥', text: 'Hot Today', color: 'text-red-500 bg-red-100 border-red-400' }
       if (rank <= 10) return { emoji: '⭐', text: 'Rising Star', color: 'text-purple-500 bg-purple-100 border-purple-400' }
@@ -1138,17 +1228,7 @@ export default function App() {
       sendingRequestsRef.current.add(receiverId)
       setSendingRequest(true)
       setLikedProfiles(prev => new Set(prev).add(receiverId))
-      
-      // Check if using bonus likes
-      if (bonusLikesRemaining > 0 && bonusExpiry && new Date() < bonusExpiry) {
-        // Use bonus like
-        const newBonus = bonusLikesRemaining - 1
-        setBonusLikesRemaining(newBonus)
-        localStorage.setItem('bonusLikes', newBonus.toString())
-        toast.success(`💎 Bonus like used! ${newBonus} remaining 🚀`, { duration: 2000 })
-      } else {
-        toast.success('Friend request sent! 🚀', { duration: 2000 })
-      }
+      toast.success('Friend request sent! 🚀', { duration: 2000 })
 
       // ⚡ Send request in background (non-blocking)
       const response = await fetch('/api/friend-request/send', {
@@ -2887,33 +2967,45 @@ export default function App() {
               
               {/* Countdown */}
               <div className="bg-white/80 backdrop-blur rounded-xl p-4 border-2 border-orange-300">
-                <p className="text-xs text-gray-600 mb-2">Expires in:</p>
+                <p className="text-xs text-gray-600 mb-2">{bonusClaimed ? 'Reward Claimed! ✅' : 'Claim before time expires:'}</p>
                 <div className="text-4xl font-black text-orange-600">
-                  {bonusExpiry && (
+                  {bonusExpiry && !bonusClaimed && (
                     <>
                       {Math.floor((bonusExpiry - new Date()) / 60000)}:
                       {String(Math.floor(((bonusExpiry - new Date()) % 60000) / 1000)).padStart(2, '0')}
                     </>
                   )}
+                  {bonusClaimed && <span className="text-green-600">✓</span>}
                 </div>
               </div>
               
-              <button
-                onClick={() => {
-                  setShowBonusModal(false)
-                  setActiveTab('discover') // Take them to discover page
-                }}
-                className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
-              >
-                Use Bonus Likes Now! 🔥
-              </button>
-              
-              <button
-                onClick={() => setShowBonusModal(false)}
-                className="text-sm text-gray-600 hover:text-gray-800 underline"
-              >
-                Maybe later
-              </button>
+              {!bonusClaimed ? (
+                <>
+                  <button
+                    onClick={claimBonusReward}
+                    className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all"
+                  >
+                    💎 Collect 3 Bonus Likes NOW!
+                  </button>
+                  
+                  <button
+                    onClick={() => setShowBonusModal(false)}
+                    className="text-sm text-gray-600 hover:text-gray-800 underline"
+                  >
+                    Maybe later (expires in {Math.floor((bonusExpiry - new Date()) / 60000)} min)
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    setShowBonusModal(false)
+                    setActiveTab('leaderboard')
+                  }}
+                  className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg"
+                >
+                  View Leaderboard 🏆
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2930,19 +3022,6 @@ export default function App() {
               </h1>
             </div>
             <div className="flex items-center gap-1 md:gap-3">
-              {/* Bonus Likes Indicator */}
-              {bonusLikesRemaining > 0 && bonusExpiry && new Date() < bonusExpiry && (
-                <div className="bg-gradient-to-r from-yellow-400 to-orange-400 text-white px-3 py-1.5 rounded-full shadow-lg border-2 border-yellow-300 animate-pulse">
-                  <span className="text-xs md:text-sm font-bold flex items-center gap-1">
-                    <span>💎</span>
-                    <span>{bonusLikesRemaining} Bonus</span>
-                    <span className="hidden md:inline">
-                      • {Math.floor((bonusExpiry - new Date()) / 60000)}:{String(Math.floor(((bonusExpiry - new Date()) % 60000) / 1000)).padStart(2, '0')}
-                    </span>
-                  </span>
-                </div>
-              )}
-              
               {/* Help Button */}
               <button
                 onClick={() => setShowHelpModal(true)}
@@ -3342,7 +3421,10 @@ export default function App() {
               <div className="flex justify-center gap-3 md:gap-4">
                 {/* Home Button */}
                 <button
-                  onClick={() => setMainNav('home')}
+                  onClick={() => {
+                    setMainNav('home')
+                    // Don't clear unread here - only clear when opening Friends tab
+                  }}
                   className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
                     mainNav === 'home'
                       ? 'bg-gradient-to-r from-pink-500 via-purple-500 to-pink-600 text-white shadow-xl shadow-pink-300/50 scale-105'
@@ -3351,7 +3433,7 @@ export default function App() {
                 >
                   <Home className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'home' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Home</span>
-                  {unreadMessages.size > 0 && (
+                  {unreadMessages.size > 0 && mainNav !== 'home' && (
                     <span className="absolute -top-1 -right-1 flex h-5 w-5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 border-2 border-white items-center justify-center">
@@ -3416,7 +3498,7 @@ export default function App() {
                 className="relative data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-green-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 Friends
-                {unreadMessages.size > 0 && (
+                {unreadMessages.size > 0 && activeTab !== 'matches' && (
                   <span className="absolute -top-1 -right-1 flex h-6 w-6">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-6 w-6 bg-red-500 text-white text-xs font-bold items-center justify-center z-10 border-2 border-white shadow-lg">
@@ -3464,7 +3546,7 @@ export default function App() {
                   className="relative flex-1 max-w-[170px] rounded-full shadow-lg bg-gradient-to-br from-green-50 to-emerald-50 data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-green-300/50 border-2 border-green-200 data-[state=active]:border-green-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   Friends
-                  {unreadMessages.size > 0 && (
+                  {unreadMessages.size > 0 && activeTab !== 'matches' && (
                     <span className="absolute -top-1 -right-1 flex h-5 w-5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 text-white text-[10px] font-bold items-center justify-center z-10 border-2 border-white shadow-lg">
@@ -3804,7 +3886,7 @@ export default function App() {
                     <p className="text-sm md:text-base font-bold text-orange-700">
                       ⏰ {leaderboardType === 'daily' ? 'Daily' : 'Weekly'} reset in {countdown.hours}h {countdown.minutes}m {countdown.seconds}s
                     </p>
-                    <p className="text-xs text-orange-600 mt-1">🏆 Top 3 get featured on Instagram story!</p>
+                    <p className="text-xs text-orange-600 mt-1">💎 Get 3 free likes and improve your position in leaderboard!</p>
                   </div>
                 )}
               </div>
@@ -4624,6 +4706,16 @@ export default function App() {
                                 // Clear messages before switching to prevent cross-chat contamination
                                 setMessages([])
                                 
+                                // Clear unread badge for this specific user
+                                setUnreadMessages(prev => {
+                                  const newSet = new Set(prev)
+                                  newSet.delete(match.id)
+                                  return newSet
+                                })
+                                
+                                // Mark as read in localStorage
+                                localStorage.setItem(`lastRead_${match.id}`, new Date().toISOString())
+                                
                                 // Check if mobile view
                                 if (window.innerWidth < 1024) {
                                   setSelectedMatch(match)
@@ -4659,9 +4751,14 @@ export default function App() {
                                     </p>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    {/* Blue dot for unread messages */}
+                                    {/* Red notification dot for unread messages */}
                                     {hasUnread && (
-                                      <span className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse"></span>
+                                      <div className="relative flex items-center justify-center">
+                                        <span className="flex h-3 w-3">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 border-2 border-white shadow-lg"></span>
+                                        </span>
+                                      </div>
                                     )}
                                     <MessageCircle className="h-5 w-5 text-purple-500" />
                                   </div>
