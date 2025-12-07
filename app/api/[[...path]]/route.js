@@ -324,7 +324,7 @@ async function handleGetProfiles(request) {
     // Get all profiles except current user
     const { data: profiles, error } = await supabase
       .from('profiles')
-      .select('id, name, bio, age, gender, branch, year, location, instagram, interests, hobbies, profile_picture, email, created_at')
+      .select('id, name, bio, age, gender, branch, year, location, instagram, github, linkedin, interests, hobbies, profile_picture, email, created_at')
       .neq('id', userId)
       .order('created_at', { ascending: false })
 
@@ -490,7 +490,7 @@ async function handleCreateProfileFromClerk(request) {
 async function handleUpdateProfile(request) {
   try {
     const body = await request.json()
-    const { userId, name, bio, age, gender, profile_picture, photo_url, location, instagram, interests, hobbies, department, year } = body
+    const { userId, name, bio, age, gender, profile_picture, photo_url, location, instagram, github, linkedin, interests, hobbies, department, year } = body
 
     // Build update object with only provided fields
     const updateData = {}
@@ -503,6 +503,8 @@ async function handleUpdateProfile(request) {
     if (profile_picture !== undefined) updateData.profile_picture = profile_picture
     if (location !== undefined) updateData.location = location
     if (instagram !== undefined) updateData.instagram = instagram
+    if (github !== undefined) updateData.github = github
+    if (linkedin !== undefined) updateData.linkedin = linkedin
     if (interests !== undefined) updateData.interests = interests
     if (hobbies !== undefined) updateData.hobbies = hobbies
     if (department !== undefined) updateData.branch = department // Map department to branch
