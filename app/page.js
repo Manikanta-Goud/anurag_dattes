@@ -426,87 +426,87 @@ export default function App() {
       console.log('🔔 Subscribing to real-time friend requests for user:', currentUser.id)
       
       const channel = supabase
-        .channel(`friend-requests-${currentUser.id}`)
+        .channel('friend-requests-channel')
         .on('postgres_changes', {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'friend_requests',
           filter: `receiver_id=eq.${currentUser.id}`
         }, async (payload) => {
-          console.log('⚡ NEW FRIEND REQUEST RECEIVED:', payload.new)
+          console.log('📬 Friend request real-time event:', payload)
           
-          // Only show if status is pending
-          if (payload.new.status !== 'pending') {
-            console.log('⚠️ Skipping non-pending request')
-            return
-          }
-          
-          // Fetch the sender's profile data
-          try {
-            const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
-            const data = await response.json()
+          if (payload.eventType === 'INSERT') {
+            console.log('⚡ NEW FRIEND REQUEST RECEIVED:', payload.new)
             
-            if (response.ok && data.profiles) {
-              const senderProfile = data.profiles.find(p => p.id === payload.new.sender_id)
-              
-              if (senderProfile) {
-                const newRequest = {
-                  id: payload.new.id,
-                  sender_id: payload.new.sender_id,
-                  receiver_id: payload.new.receiver_id,
-                  status: payload.new.status,
-                  requestedAt: payload.new.created_at,
-                  ...senderProfile
-                }
-                
-                // Add to friend requests list instantly
-                setFriendRequests(prev => {
-                  // Avoid duplicates
-                  if (prev.some(req => req.id === newRequest.id)) {
-                    return prev
-                  }
-                  return [newRequest, ...prev]
-                })
-                
-                // Show notification toast
-                toast.success(`${senderProfile.name} sent you a friend request! 🎉`, {
-                  duration: 5000,
-                  action: {
-                    label: 'View',
-                    onClick: () => setShowNotifications(true)
-                  }
-                })
-                
-                console.log('✅ Friend request added to notifications:', newRequest)
-              }
+            // Only show if status is pending
+            if (payload.new.status !== 'pending') {
+              console.log('⚠️ Skipping non-pending request')
+              return
             }
-          } catch (error) {
-            console.error('Failed to fetch sender profile:', error)
-            // Fallback: reload all friend requests
-            loadFriendRequests(currentUser.id)
-          }
-        })
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'friend_requests',
-          filter: `receiver_id=eq.${currentUser.id}`
-        }, (payload) => {
-          console.log('⚡ FRIEND REQUEST UPDATED:', payload.new)
-          
-          // If status changed to accepted or rejected, remove from notifications
-          if (payload.new.status === 'accepted' || payload.new.status === 'rejected') {
-            setFriendRequests(prev => prev.filter(req => req.id !== payload.new.id))
-            console.log('✅ Removed request from notifications (status:', payload.new.status + ')')
+            
+            // Fetch the sender's profile data
+            try {
+              const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
+              const data = await response.json()
+              
+              if (response.ok && data.profiles) {
+                const senderProfile = data.profiles.find(p => p.id === payload.new.sender_id)
+                
+                if (senderProfile) {
+                  const newRequest = {
+                    id: payload.new.id,
+                    sender_id: payload.new.sender_id,
+                    receiver_id: payload.new.receiver_id,
+                    status: payload.new.status,
+                    requestedAt: payload.new.created_at,
+                    ...senderProfile
+                  }
+                  
+                  // Add to friend requests list instantly
+                  setFriendRequests(prev => {
+                    // Avoid duplicates
+                    if (prev.some(req => req.id === newRequest.id)) {
+                      return prev
+                    }
+                    return [newRequest, ...prev]
+                  })
+                  
+                  // Show notification toast
+                  toast.success(`${senderProfile.name} sent you a friend request! 🎉`, {
+                    duration: 5000,
+                    action: {
+                      label: 'View',
+                      onClick: () => setShowNotifications(true)
+                    }
+                  })
+                  
+                  console.log('✅ Friend request added to notifications:', newRequest)
+                }
+              }
+            } catch (error) {
+              console.error('Failed to fetch sender profile:', error)
+              // Fallback: reload all friend requests
+              loadFriendRequests(currentUser.id)
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            console.log('⚡ FRIEND REQUEST UPDATED:', payload.new)
+            
+            // If status changed to accepted or rejected, remove from notifications
+            if (payload.new.status === 'accepted' || payload.new.status === 'rejected') {
+              setFriendRequests(prev => prev.filter(req => req.id !== payload.new.id))
+              console.log('✅ Removed request from notifications (status:', payload.new.status + ')')
+            }
+          } else if (payload.eventType === 'DELETE') {
+            console.log('🗑️ FRIEND REQUEST DELETED:', payload.old)
+            setFriendRequests(prev => prev.filter(req => req.id !== payload.old.id))
           }
         })
         .subscribe((status) => {
           console.log('📡 Friend requests Realtime status:', status)
           if (status === 'SUBSCRIBED') {
-            console.log('✅ Listening for new friend requests!')
+            console.log('✅ Successfully subscribed to friend requests!')
           } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Realtime connection error, will retry...')
-            // Don't show error toast - connection will auto-reconnect
+            console.error('❌ Failed to subscribe to friend requests')
           }
         })
       
@@ -1239,6 +1239,10 @@ export default function App() {
       if (response.ok) {
         // Reload matches to show new chat
         await loadMatches(currentUser.id)
+        
+        // Reload profiles to update "Unlike" button in Discover tab
+        await loadProfiles(currentUser.id)
+        
         return true
       } else {
         console.error('❌ Accept error:', data.error)
@@ -1345,14 +1349,21 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
-        toast.success('Friend removed')
+        toast.success('Friend removed - All chat history deleted to save storage 🗑️')
+        
         // Remove from liked profiles so they can send request again
         setLikedProfiles(prev => {
           const newSet = new Set(prev)
           newSet.delete(friendId)
           return newSet
         })
+        
+        // Reload matches to remove from Friends tab
         loadMatches(currentUser.id)
+        
+        // Reload profiles to show "Send Request" button in Discover tab
+        loadProfiles(currentUser.id)
+        
         setSelectedMatch(null)
       } else {
         toast.error(data.error || 'Failed to remove friend')

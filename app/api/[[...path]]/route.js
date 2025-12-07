@@ -1910,6 +1910,20 @@ async function handleRemoveFriend(request) {
   try {
     const { userId1, userId2 } = await request.json()
 
+    console.log('🗑️ Removing friendship between:', userId1, userId2)
+
+    // Delete all chat messages between these users (save storage!)
+    const { error: messagesError } = await supabaseAdmin
+      .from('messages')
+      .delete()
+      .or(`and(sender_id.eq.${userId1},receiver_id.eq.${userId2}),and(sender_id.eq.${userId2},receiver_id.eq.${userId1})`)
+
+    if (messagesError) {
+      console.error('❌ Error deleting messages:', messagesError)
+    } else {
+      console.log('✅ All chat messages deleted')
+    }
+
     // Delete match
     const { error } = await supabaseAdmin
       .from('matches')
@@ -1930,11 +1944,14 @@ async function handleRemoveFriend(request) {
       .delete()
       .or(`and(liker_id.eq.${userId1},liked_id.eq.${userId2}),and(liker_id.eq.${userId2},liked_id.eq.${userId1})`)
 
+    console.log('✅ Friendship removed successfully')
+
     return NextResponse.json({
       success: true,
-      message: 'Friend removed successfully'
+      message: 'Friend removed successfully, all chat history deleted'
     })
   } catch (error) {
+    console.error('❌ Error removing friend:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
