@@ -1623,6 +1623,34 @@ async function handleSendFriendRequest(request) {
 
     if (error) throw error
 
+    // 🎯 INCREMENT LIKE COUNTS for the RECEIVER (person receiving the request)
+    // When User A sends request to User B → User B's likes increase immediately
+    try {
+      console.log('🎯 Incrementing likes for RECEIVER:', receiverId)
+
+      const { data: receiverProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('total_likes, daily_likes, weekly_likes')
+        .eq('id', receiverId)
+        .single()
+
+      if (receiverProfile) {
+        await supabaseAdmin
+          .from('profiles')
+          .update({
+            total_likes: (receiverProfile.total_likes || 0) + 1,
+            daily_likes: (receiverProfile.daily_likes || 0) + 1,
+            weekly_likes: (receiverProfile.weekly_likes || 0) + 1
+          })
+          .eq('id', receiverId)
+
+        console.log('✅ Like counts incremented for receiver')
+      }
+    } catch (likeError) {
+      console.error('⚠️ Error incrementing likes:', likeError)
+      // Don't fail the request if like increment fails
+    }
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('❌ Send friend request error:', error)
@@ -1822,6 +1850,53 @@ async function handleRejectFriendRequest(request) {
       message: 'Friend request rejected'
     })
   } catch (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+async function handleDecrementLike(request) {
+  try {
+    const { profileId } = await request.json()
+
+    console.log('💔 Decrementing like counts for profile:', profileId)
+
+    const { data: currentProfile, error: fetchError } = await supabaseAdmin
+      .from('profiles')
+      .select('total_likes, daily_likes, weekly_likes')
+      .eq('id', profileId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const newTotalLikes = Math.max((currentProfile.total_likes || 0) - 1, 0)
+    const newDailyLikes = Math.max((currentProfile.daily_likes || 0) - 1, 0)
+    const newWeeklyLikes = Math.max((currentProfile.weekly_likes || 0) - 1, 0)
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update({
+        total_likes: newTotalLikes,
+        daily_likes: newDailyLikes,
+        weekly_likes: newWeeklyLikes
+      })
+      .eq('id', profileId)
+      .select('id, total_likes, daily_likes, weekly_likes')
+      .single()
+
+    if (error) throw error
+
+    console.log('✅ Like counts decremented:', data)
+
+    return NextResponse.json({
+      success: true,
+      message: 'Like count decremented',
+      profile: data
+    })
+  } catch (error) {
+    console.error('❌ Decrement like error:', error)
     return NextResponse.json(
       { error: error.message },
       { status: 500 }
@@ -2292,6 +2367,8 @@ export async function POST(request) {
     return handleAcceptFriendRequest(request)
   } else if (pathname.includes('/api/friend-request/reject')) {
     return handleRejectFriendRequest(request)
+  } else if (pathname.includes('/api/decrement-like')) {
+    return handleDecrementLike(request)
   } else if (pathname.includes('/api/block-user')) {
     return handleBlockUser(request)
   } else if (pathname.includes('/api/unblock-user')) {
