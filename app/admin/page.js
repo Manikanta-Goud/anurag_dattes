@@ -49,10 +49,14 @@ export default function AdminPanel() {
   const [events, setEvents] = useState([])
   const [showEventModal, setShowEventModal] = useState(false)
   const [editingEvent, setEditingEvent] = useState(null)
+  const [eventImagePreview, setEventImagePreview] = useState('')
+  const [uploadingEventImage, setUploadingEventImage] = useState(false)
   const [eventForm, setEventForm] = useState({
     title: '',
     description: '',
+    is_multi_day: false,
     event_date: '',
+    end_date: '',
     event_time: '',
     venue: '',
     club_name: '',
@@ -176,6 +180,90 @@ export default function AdminPanel() {
 
   const closeUserProfile = () => {
     setSelectedUserProfile(null)
+  }
+
+  // Event image upload handlers
+  const handleEventImageSelect = async (file) => {
+    if (!file) return
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file')
+      return
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB')
+      return
+    }
+
+    // Create preview
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setEventImagePreview(reader.result)
+      setEventForm({...eventForm, image_url: reader.result})
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleEventImageDrop = (e) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (file) handleEventImageSelect(file)
+  }
+
+  const handleEventImageDragOver = (e) => {
+    e.preventDefault()
+  }
+
+  const uploadEventImageToServer = async (base64Image) => {
+    try {
+      setUploadingEventImage(true)
+      console.log('📸 Uploading event image to Supabase...')
+
+      // Convert base64 to blob
+      const response = await fetch(base64Image)
+      const blob = await response.blob()
+
+      // Generate unique filename
+      const timestamp = Date.now()
+      const randomStr = Math.random().toString(36).substring(7)
+      const fileExtension = blob.type.split('/')[1] || 'jpg'
+      const fileName = `event_${timestamp}_${randomStr}.${fileExtension}`
+
+      // Upload to Supabase Storage
+      const { createClient } = await import('@supabase/supabase-js')
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://hjlyprguxvumjuyyeyym.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhqbHlwcmd1eHZ1bWp1eXlleXltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0MDA4NTYsImV4cCI6MjA3Njk3Njg1Nn0.kePxSVM8MHCDA2AhpB48vh3apkEQbpiyk83GLblHD9c'
+      )
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('event-photos')
+        .upload(fileName, blob, {
+          contentType: blob.type,
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('event-photos')
+        .getPublicUrl(fileName)
+
+      setUploadingEventImage(false)
+      console.log('✅ Event image uploaded:', urlData.publicUrl)
+      return urlData.publicUrl
+
+    } catch (error) {
+      console.error('❌ Event image upload error:', error)
+      setUploadingEventImage(false)
+      toast.error('Failed to upload image: ' + error.message)
+      return null
+    }
   }
 
   const openWarningModal = (user) => {
@@ -922,10 +1010,13 @@ export default function AdminPanel() {
                   <Button
                     onClick={() => {
                       setEditingEvent(null)
+                      setEventImagePreview('')
                       setEventForm({
                         title: '',
                         description: '',
+                        is_multi_day: false,
                         event_date: '',
+                        end_date: '',
                         event_time: '',
                         venue: '',
                         club_name: '',
@@ -988,10 +1079,13 @@ export default function AdminPanel() {
                                   variant="outline"
                                   onClick={() => {
                                     setEditingEvent(event)
+                                    setEventImagePreview(event.image_url || '')
                                     setEventForm({
                                       title: event.title,
                                       description: event.description,
+                                      is_multi_day: !!event.end_date,
                                       event_date: event.event_date,
+                                      end_date: event.end_date || '',
                                       event_time: event.event_time,
                                       venue: event.venue,
                                       club_name: event.club_name || '',
@@ -1041,8 +1135,19 @@ export default function AdminPanel() {
                             <div className="grid grid-cols-2 gap-4 mt-4">
                               <div className="flex items-center gap-2 text-sm text-gray-700">
                                 <Calendar className="h-4 w-4 text-purple-600" />
-                                <span>{new Date(event.event_date).toLocaleDateString()}</span>
-                                <span className="text-gray-500">at {event.event_time}</span>
+                                <span>
+                                  {event.end_date 
+                                    ? `${new Date(event.event_date).toLocaleDateString()} - ${new Date(event.end_date).toLocaleDateString()}`
+                                    : new Date(event.event_date).toLocaleDateString()
+                                  }
+                                </span>
+                                <span className="text-gray-500">at {(() => {
+                                  const [hours, minutes] = (event.event_time || '').split(':');
+                                  const hour = parseInt(hours);
+                                  const ampm = hour >= 12 ? 'PM' : 'AM';
+                                  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                                  return `${displayHour}:${minutes} ${ampm}`;
+                                })()}</span>
                               </div>
                               <div className="flex items-center gap-2 text-sm text-gray-700">
                                 <MapPin className="h-4 w-4 text-purple-600" />
@@ -1584,17 +1689,67 @@ export default function AdminPanel() {
                   />
                 </div>
 
-                {/* Date */}
+                {/* Event Duration Type */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700 block mb-2">Event Duration *</label>
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="duration"
+                        checked={!eventForm.is_multi_day}
+                        onChange={() => setEventForm({...eventForm, is_multi_day: false, end_date: ''})}
+                        className="w-4 h-4 text-purple-600"
+                      />
+                      <span className="text-gray-700">1 Day Event</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="duration"
+                        checked={eventForm.is_multi_day}
+                        onChange={() => setEventForm({...eventForm, is_multi_day: true})}
+                        className="w-4 h-4 text-purple-600"
+                      />
+                      <span className="text-gray-700">Multi-Day Event</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Start Date */}
                 <div>
-                  <label className="text-sm font-semibold text-gray-700">Event Date *</label>
+                  <label className="text-sm font-semibold text-gray-700">
+                    {eventForm.is_multi_day ? 'Start Date *' : 'Event Date *'}
+                  </label>
                   <input
                     type="date"
                     value={eventForm.event_date}
                     onChange={(e) => setEventForm({...eventForm, event_date: e.target.value})}
+                    min={new Date().toISOString().split('T')[0]}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     required
                   />
                 </div>
+
+                {/* End Date (only for multi-day events) */}
+                {eventForm.is_multi_day && (
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700">End Date *</label>
+                    <input
+                      type="date"
+                      value={eventForm.end_date}
+                      onChange={(e) => setEventForm({...eventForm, end_date: e.target.value})}
+                      min={eventForm.event_date || new Date().toISOString().split('T')[0]}
+                      className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      required
+                    />
+                    {eventForm.event_date && eventForm.end_date && (
+                      <p className="text-xs text-purple-600 mt-1">
+                        Duration: {Math.ceil((new Date(eventForm.end_date) - new Date(eventForm.event_date)) / (1000 * 60 * 60 * 24)) + 1} days
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Time */}
                 <div>
@@ -1606,6 +1761,7 @@ export default function AdminPanel() {
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     required
                   />
+                  <p className="text-xs text-gray-500 mt-1">24-hour format (e.g., 09:00 for 9 AM, 21:00 for 9 PM)</p>
                 </div>
 
                 {/* Venue */}
@@ -1688,16 +1844,56 @@ export default function AdminPanel() {
                   />
                 </div>
 
-                {/* Image URL */}
+                {/* Image Upload with Drag & Drop */}
                 <div className="col-span-2">
-                  <label className="text-sm font-semibold text-gray-700">Event Image URL</label>
-                  <input
-                    type="url"
-                    value={eventForm.image_url}
-                    onChange={(e) => setEventForm({...eventForm, image_url: e.target.value})}
-                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="https://example.com/event-poster.jpg"
-                  />
+                  <label className="text-sm font-semibold text-gray-700 mb-2 block">Event Poster/Image</label>
+                  
+                  {!eventImagePreview && !eventForm.image_url ? (
+                    <div
+                      onDrop={handleEventImageDrop}
+                      onDragOver={handleEventImageDragOver}
+                      className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-purple-400 transition-colors cursor-pointer bg-gray-50"
+                      onClick={() => document.getElementById('event-image-input').click()}
+                    >
+                      <div className="flex flex-col items-center gap-3">
+                        <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Drop event poster here or click to browse</p>
+                          <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB</p>
+                        </div>
+                      </div>
+                      <input
+                        id="event-image-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleEventImageSelect(e.target.files[0])}
+                        className="hidden"
+                      />
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <img
+                        src={eventImagePreview || eventForm.image_url}
+                        alt="Event preview"
+                        className="w-full max-h-64 object-contain rounded-lg border-2 border-purple-200 bg-gray-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEventImagePreview('')
+                          setEventForm({...eventForm, image_url: ''})
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 shadow-lg"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                      <p className="text-xs text-green-600 mt-2 font-medium">✓ Image ready! Will be uploaded when you save the event.</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Registration Required */}
@@ -1755,17 +1951,55 @@ export default function AdminPanel() {
               <div className="flex gap-3 pt-4">
                 <Button
                   onClick={async () => {
+                    // Validation
                     if (!eventForm.title || !eventForm.description || !eventForm.event_date || !eventForm.event_time || !eventForm.venue) {
                       alert('Please fill all required fields (*)')
                       return
                     }
 
+                    // Check end_date for multi-day events
+                    if (eventForm.is_multi_day && !eventForm.end_date) {
+                      alert('Please provide an end date for multi-day events')
+                      return
+                    }
+
+                    // Validate end_date is after start date
+                    if (eventForm.is_multi_day && eventForm.end_date) {
+                      if (new Date(eventForm.end_date) < new Date(eventForm.event_date)) {
+                        alert('End date must be after start date')
+                        return
+                      }
+                    }
+
                     setSavingEvent(true)
                     try {
+                      // Upload image if it's base64
+                      let finalImageUrl = eventForm.image_url
+                      if (eventForm.image_url && !eventForm.image_url.startsWith('http')) {
+                        console.log('📸 Uploading event image...')
+                        const uploadedUrl = await uploadEventImageToServer(eventForm.image_url)
+                        if (uploadedUrl) {
+                          finalImageUrl = uploadedUrl
+                        } else {
+                          alert('Failed to upload image. Please try again.')
+                          setSavingEvent(false)
+                          return
+                        }
+                      }
+
                       const url = editingEvent ? '/api/events/update' : '/api/events/create'
+                      
+                      // Fix: Convert empty string to null for integer fields
+                      const cleanedForm = {
+                        ...eventForm,
+                        image_url: finalImageUrl,
+                        max_capacity: eventForm.max_capacity === '' ? null : parseInt(eventForm.max_capacity),
+                        end_date: eventForm.is_multi_day ? eventForm.end_date : null
+                      }
+                      
                       const body = editingEvent 
-                        ? { ...eventForm, eventId: editingEvent.id }
-                        : eventForm
+                        ? { ...cleanedForm, eventId: editingEvent.id }
+                        : cleanedForm
 
                       console.log('Creating event with data:', body)
 
@@ -1789,6 +2023,7 @@ export default function AdminPanel() {
                         }
                         setShowEventModal(false)
                         setEditingEvent(null)
+                        setEventImagePreview('')
                       } else {
                         alert('Failed to save event: ' + (data.error || 'Unknown error'))
                       }

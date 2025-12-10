@@ -430,14 +430,24 @@ async function handleCreateProfileFromClerk(request) {
     if (existingProfile) {
       console.log('✅ Profile already exists, updating with Clerk user ID:', existingProfile.id)
       
+      // Prepare update data
+      const updateData = {
+        clerk_user_id: clerkUserId,
+        is_verified: true,
+        updated_at: new Date().toISOString()
+      }
+      
+      // Fix old gender values if they're invalid
+      const validGenders = ['male', 'female', 'other']
+      if (existingProfile.gender && !validGenders.includes(existingProfile.gender.toLowerCase())) {
+        console.log('🔧 Fixing invalid gender value:', existingProfile.gender, '→ other')
+        updateData.gender = 'other'
+      }
+      
       // Update existing profile with Clerk user ID
       const { data: updatedProfile, error: updateError } = await supabaseAdmin
         .from('profiles')
-        .update({
-          clerk_user_id: clerkUserId,
-          is_verified: true,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', existingProfile.id)
         .select()
         .single()
@@ -471,7 +481,7 @@ async function handleCreateProfileFromClerk(request) {
         roll_number: rollNumber,
         branch: branch,
         year: academicYear,
-        gender: 'prefer_not_to_say',
+        gender: 'other',
         age: 18,
         is_verified: true, // Clerk handles email verification
         is_active: true
@@ -516,7 +526,18 @@ async function handleUpdateProfile(request) {
     if (name !== undefined) updateData.name = name
     if (bio !== undefined) updateData.bio = bio
     if (age !== undefined) updateData.age = age
-    if (gender !== undefined) updateData.gender = gender
+    if (gender !== undefined) {
+      // Validate and normalize gender value to match database constraint
+      const validGenders = ['male', 'female', 'other']
+      const normalizedGender = gender.toLowerCase()
+      
+      // Map old/invalid values to valid ones
+      if (!validGenders.includes(normalizedGender)) {
+        updateData.gender = 'other'
+      } else {
+        updateData.gender = normalizedGender
+      }
+    }
     // Accept both profile_picture and photo_url (map photo_url to profile_picture)
     if (photo_url !== undefined) updateData.profile_picture = photo_url
     if (profile_picture !== undefined) updateData.profile_picture = profile_picture
@@ -536,7 +557,6 @@ async function handleUpdateProfile(request) {
       .update(updateData)
       .eq('id', userId)
       .select()
-      .single()
 
     if (error) {
       console.error('Update profile error:', error)
@@ -546,11 +566,21 @@ async function handleUpdateProfile(request) {
       )
     }
 
+    // Get the first (and should be only) updated profile
+    const updatedProfile = Array.isArray(data) ? data[0] : data
+
+    if (!updatedProfile) {
+      return NextResponse.json(
+        { error: 'Profile not found' },
+        { status: 404 }
+      )
+    }
+
     // Map profile_picture to photo_url for frontend compatibility
     const profileWithPhotoUrl = {
-      ...data,
-      photo_url: data.profile_picture,
-      department: data.branch
+      ...updatedProfile,
+      photo_url: updatedProfile.profile_picture,
+      department: updatedProfile.branch
     }
 
     return NextResponse.json({ profile: profileWithPhotoUrl })
@@ -2096,6 +2126,7 @@ async function handleCreateEvent(request) {
       title,
       description,
       event_date,
+      end_date,
       event_time,
       venue,
       club_name,
@@ -2116,6 +2147,7 @@ async function handleCreateEvent(request) {
         title,
         description,
         event_date,
+        end_date: end_date || null,
         event_time,
         location: venue, // Map venue to location column
         club_name,

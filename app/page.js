@@ -111,7 +111,7 @@ export default function App() {
     name: '',
     bio: '',
     age: 18,
-    gender: 'prefer_not_to_say',
+    gender: 'other',
     location: '',
     instagram: '',
     github: '',
@@ -644,7 +644,7 @@ export default function App() {
           name: profileForm.name,
           bio: profileForm.bio || '',
           age: parseInt(profileForm.age) || 18,
-          gender: profileForm.gender || 'prefer_not_to_say',
+          gender: profileForm.gender || 'other',
           location: profileForm.location || '',
           instagram: profileForm.instagram || '',
           github: profileForm.github || '',
@@ -1818,10 +1818,20 @@ export default function App() {
   }
 
   const handleLogout = async () => {
-    await signOut()
-    setCurrentUser(null)
-    setView('landing')
-    toast.success('Logged out successfully')
+    try {
+      // Clear local state first
+      setCurrentUser(null)
+      setView('landing')
+      
+      // Sign out from Clerk
+      await signOut()
+      
+      toast.success('Logged out successfully')
+    } catch (error) {
+      console.error('Logout error:', error)
+      // Still show success since local state is cleared
+      toast.success('Logged out')
+    }
   }
 
   const handleUpdateMyProfile = async (e) => {
@@ -2195,6 +2205,19 @@ export default function App() {
                   </Button>
                 </a>
               </div>
+
+              {/* College Email Notice */}
+              <div className="mt-4 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-xl p-3 sm:p-4 shadow-md">
+                <p className="text-xs sm:text-sm text-center text-gray-700">
+                  <span className="inline-flex items-center gap-1 flex-wrap justify-center">
+                    <span className="text-base sm:text-lg">📧</span>
+                    <span className="font-semibold">Important:</span>
+                    <span>Students must register using their official college email ID</span>
+                    <span className="font-bold text-amber-600 whitespace-nowrap">(@anurag.edu.in)</span>
+                    <span>only.</span>
+                  </span>
+                </p>
+              </div>
             </div>
 
             {/* College Photos */}
@@ -2306,7 +2329,7 @@ export default function App() {
                   >
                     <option value="male">Male</option>
                     <option value="female">Female</option>
-                    <option value="prefer_not_to_say">Prefer not to say</option>
+                    <option value="other">Prefer not to say</option>
                   </select>
                 </div>
               </div>
@@ -2713,7 +2736,7 @@ export default function App() {
                           <SelectContent>
                             <SelectItem value="male">Male</SelectItem>
                             <SelectItem value="female">Female</SelectItem>
-                            <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                            <SelectItem value="other">Prefer not to say</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -6396,9 +6419,34 @@ export default function App() {
                   <h3 className="text-xl font-bold text-gray-800 mb-3">
                     Coming Soon!
                   </h3>
-                  <p className="text-gray-700 mb-4">
-                    This feature will be enabled when our platform receives <span className="font-bold text-orange-600">50 students or above</span>.
+                  
+                  {/* How It Works */}
+                  <div className="bg-gradient-to-br from-orange-50 to-pink-50 rounded-xl p-4 mb-4 text-left border-2 border-orange-200">
+                    <p className="text-sm font-bold text-orange-600 mb-2 text-center">🎲 How Dice Dating Works</p>
+                    <div className="space-y-2 text-xs text-gray-700">
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold text-orange-500 mt-0.5">•</span>
+                        <span><span className="font-semibold">Roll once daily</span> to get your lucky number (1-6)</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold text-pink-500 mt-0.5">•</span>
+                        <span><span className="font-semibold">Match with someone</span> who rolled the same number today</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold text-orange-500 mt-0.5">•</span>
+                        <span><span className="font-semibold">It's fate!</span> Chat instantly when numbers align 💫</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <span className="font-bold text-pink-500 mt-0.5">•</span>
+                        <span><span className="font-semibold">New chances daily</span> - roll again tomorrow for fresh matches</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-gray-700 mb-4 text-sm">
+                    Unlocks when we reach <span className="font-bold text-orange-600">50 students or above</span>
                   </p>
+                  
                   <div className="bg-gradient-to-r from-orange-100 to-pink-100 rounded-xl p-4 mb-4">
                     <p className="text-sm font-semibold text-gray-800">Current Users</p>
                     <p className="text-3xl font-black text-orange-600">{totalUserCount} / 50</p>
@@ -6409,8 +6457,8 @@ export default function App() {
                       ></div>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-600">
-                    Invite your friends to unlock this exciting feature! 🎲
+                  <p className="text-sm text-gray-600 font-medium">
+                    Invite your friends to unlock this exciting feature! 🎲✨
                   </p>
                 </div>
                 <Button
