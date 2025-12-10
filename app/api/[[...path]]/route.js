@@ -355,6 +355,25 @@ async function handleGetProfiles(request) {
   }
 }
 
+// Get total count of profiles
+async function handleGetProfileCount(request) {
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+
+    if (error) throw error
+
+    return NextResponse.json({ count: count || 0 })
+  } catch (error) {
+    console.error('❌ Get profile count error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
 async function handleCreateProfileFromClerk(request) {
   try {
     const body = await request.json()
@@ -2682,6 +2701,8 @@ export async function GET(request) {
     return handleGetEvents(request)
   } else if (pathname.includes('/api/profile-by-clerk')) {
     return handleGetProfileByClerkId(request)
+  } else if (pathname.includes('/api/profiles/count')) {
+    return handleGetProfileCount(request)
   } else if (pathname.includes('/api/profiles')) {
     return handleGetProfiles(request)
   } else if (pathname.includes('/api/matches')) {
