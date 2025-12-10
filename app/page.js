@@ -681,7 +681,16 @@ export default function App() {
       if (response.ok) {
         // Filter out blocked users
         const filtered = (data.profiles || []).filter(p => !blockedUsers.has(p.id))
-        setProfiles(filtered)
+        
+        // Prioritize specific profile at the top
+        const priorityEmail = '23eg105j13@anurag.edu.in'
+        const sorted = filtered.sort((a, b) => {
+          if (a.email === priorityEmail) return -1
+          if (b.email === priorityEmail) return 1
+          return 0
+        })
+        
+        setProfiles(sorted)
         
         // Load user's liked profiles to show request status
         const likesResponse = await fetch(`/api/likes?userId=${userId}`)
