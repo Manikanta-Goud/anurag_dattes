@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star, Dices } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -86,6 +86,20 @@ export default function App() {
   const bonusShownRef = useRef(false) // Prevent showing bonus multiple times
   const targetTimeRef = useRef(null) // Store fixed target time
 
+  // 🎲 FOMO Dice State
+  const [diceRolled, setDiceRolled] = useState(false)
+  const [myDiceNumber, setMyDiceNumber] = useState(null)
+  const [diceMatches, setDiceMatches] = useState([])
+  const [hasSelectedMatch, setHasSelectedMatch] = useState(false)
+  const [isRolling, setIsRolling] = useState(false)
+  const [showDiceAnimation, setShowDiceAnimation] = useState(false)
+  const [selectedDiceProfile, setSelectedDiceProfile] = useState(null)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [activeDiceMatches, setActiveDiceMatches] = useState([])
+  const [diceSelectionNotifications, setDiceSelectionNotifications] = useState([])
+  const [showDiceNotificationModal, setShowDiceNotificationModal] = useState(false)
+  const [selectedNotification, setSelectedNotification] = useState(null)
+
   // Scroll tracking state
   const [isUserAtBottom, setIsUserAtBottom] = useState(true) // Track if user is scrolled to bottom
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true) // Control auto-scroll behavior
@@ -95,7 +109,7 @@ export default function App() {
     name: '',
     bio: '',
     age: 18,
-    gender: 'Other',
+    gender: 'prefer_not_to_say',
     location: '',
     instagram: '',
     github: '',
@@ -628,7 +642,7 @@ export default function App() {
           name: profileForm.name,
           bio: profileForm.bio || '',
           age: parseInt(profileForm.age) || 18,
-          gender: profileForm.gender || 'Other',
+          gender: profileForm.gender || 'prefer_not_to_say',
           location: profileForm.location || '',
           instagram: profileForm.instagram || '',
           github: profileForm.github || '',
@@ -1137,6 +1151,163 @@ export default function App() {
       return { emoji: '⬇️', text: `-${change}`, color: 'text-red-500', label: null }
     }
   }
+
+  // 🎲 FOMO DICE FUNCTIONS
+
+  const rollDice = async () => {
+    if (!currentUser) return
+    
+    setIsRolling(true)
+    setShowDiceAnimation(true)
+    
+    try {
+      const response = await fetch('/api/dice/roll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id })
+      })
+      
+      const data = await response.json()
+      
+      if (data.alreadyRolled) {
+        toast.error(data.message)
+        setDiceRolled(true)
+        setMyDiceNumber(data.roll.dice_number)
+        setHasSelectedMatch(data.roll.has_selected_match)
+        setShowDiceAnimation(false)
+        loadDiceMatches()
+      } else if (data.success) {
+        // Show result instantly
+        setMyDiceNumber(data.diceNumber)
+        setDiceRolled(true)
+        setShowDiceAnimation(false)
+        toast.success(data.message)
+        loadDiceMatches()
+      }
+    } catch (error) {
+      console.error('Roll dice error:', error)
+      toast.error('Failed to roll dice')
+      setShowDiceAnimation(false)
+    } finally {
+      setIsRolling(false)
+    }
+  }
+
+  const loadDiceMatches = async () => {
+    if (!currentUser) return
+    
+    try {
+      const response = await fetch(`/api/dice/matches?userId=${currentUser.id}`)
+      const data = await response.json()
+      
+      if (data.hasRolled) {
+        setDiceRolled(true)
+        setMyDiceNumber(data.myDiceNumber)
+        setDiceMatches(data.matches || [])
+        setHasSelectedMatch(data.hasSelectedMatch)
+      }
+      
+      // Check for selection notifications
+      loadDiceSelectionNotifications()
+    } catch (error) {
+      console.error('Load dice matches error:', error)
+    }
+  }
+
+  const loadDiceSelectionNotifications = async () => {
+    if (!currentUser) return
+    
+    try {
+      const response = await fetch(`/api/dice/who-selected-me?userId=${currentUser.id}`)
+      const data = await response.json()
+      
+      if (data.selections && data.selections.length > 0) {
+        setDiceSelectionNotifications(data.selections)
+      }
+    } catch (error) {
+      console.error('Load dice selection notifications error:', error)
+    }
+  }
+
+  const selectDiceMatch = async (selectedUser) => {
+    setSelectedDiceProfile(selectedUser)
+    setShowConfirmModal(true)
+  }
+
+  const confirmDiceMatch = async () => {
+    if (!selectedDiceProfile || !currentUser) return
+    
+    try {
+      const response = await fetch('/api/dice/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          selectedUserId: selectedDiceProfile.id
+        })
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        toast.success('🎉 Instant Match! You have 24 hours to chat!')
+        setHasSelectedMatch(true)
+        setShowConfirmModal(false)
+        loadMatches(currentUser.id) // Reload matches list
+        loadActiveDiceMatches()
+      } else {
+        toast.error(data.error)
+      }
+    } catch (error) {
+      console.error('Select dice match error:', error)
+      toast.error('Failed to create match')
+    }
+  }
+
+  const loadActiveDiceMatches = async () => {
+    if (!currentUser) return
+    
+    try {
+      const response = await fetch(`/api/dice/active-matches?userId=${currentUser.id}`)
+      const data = await response.json()
+      setActiveDiceMatches(data.diceMatches || [])
+    } catch (error) {
+      console.error('Load active dice matches error:', error)
+    }
+  }
+
+  const markDiceMatchChatted = async (matchedUserId) => {
+    if (!currentUser) return
+    
+    try {
+      await fetch('/api/dice/mark-chatted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          matchedUserId
+        })
+      })
+    } catch (error) {
+      console.error('Mark dice match chatted error:', error)
+    }
+  }
+
+  // Load dice matches when mainNav changes to dice
+  useEffect(() => {
+    if (mainNav === 'dice' && currentUser) {
+      loadDiceMatches()
+      loadActiveDiceMatches()
+    }
+  }, [mainNav, currentUser])
+
+  // Auto-refresh dice matches every 30 seconds
+  useEffect(() => {
+    if (mainNav === 'dice' && diceRolled) {
+      const interval = setInterval(loadDiceMatches, 30000)
+      return () => clearInterval(interval)
+    }
+  }, [mainNav, diceRolled])
   
   // Get achievement progress for current user
   const getAchievementProgress = (currentUserRank, topProfile) => {
@@ -1600,6 +1771,17 @@ export default function App() {
             return match
           })
         })
+        
+        // 🎲 Check if this is a dice match and mark as chatted
+        const diceMatch = activeDiceMatches.find(dm => 
+          (dm.user1_id === currentUser.id && dm.user2_id === selectedMatch.matchedUser?.id) ||
+          (dm.user2_id === currentUser.id && dm.user1_id === selectedMatch.matchedUser?.id)
+        )
+
+        if (diceMatch && !diceMatch.has_chatted) {
+          await markDiceMatchChatted(selectedMatch.matchedUser.id)
+          toast.success('✅ You saved this friendship by chatting in time!', { duration: 4000 })
+        }
         
         // Force scroll to bottom when user sends a message
         setShouldAutoScroll(true)
@@ -2491,9 +2673,9 @@ export default function App() {
                             <SelectValue placeholder="Select gender" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Male">Male</SelectItem>
-                            <SelectItem value="Female">Female</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
+                            <SelectItem value="male">Male</SelectItem>
+                            <SelectItem value="female">Female</SelectItem>
+                            <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -3403,6 +3585,27 @@ export default function App() {
                 >
                   <Calendar className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'events' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Events</span>
+                </button>
+
+                {/* 🎲 FOMO Dice Button - NEW */}
+                <button
+                  onClick={() => setMainNav('dice')}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
+                    mainNav === 'dice'
+                      ? 'bg-gradient-to-r from-orange-500 via-red-500 to-pink-600 text-white shadow-xl shadow-orange-300/50 scale-105'
+                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-orange-100 hover:to-pink-100 shadow-md hover:shadow-lg border-2 border-orange-200'
+                  }`}
+                >
+                  <Dices className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'dice' ? 'animate-bounce' : ''}`} />
+                  <span className="hidden sm:inline">🎲 Dice</span>
+                  {diceSelectionNotifications.length > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-5 w-5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-5 w-5 bg-orange-500 border-2 border-white items-center justify-center">
+                        <span className="text-white text-[10px] font-bold">{diceSelectionNotifications.length}</span>
+                      </span>
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -5698,6 +5901,436 @@ export default function App() {
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 🎲 FOMO DICE SECTION */}
+        {mainNav === 'dice' && (
+          <div className="space-y-8 animate-fade-in pb-20">
+            {/* Dice Header - Compact for Mobile */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-orange-500 via-red-500 to-pink-600 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl">
+              {/* Animated Background */}
+              <div className="absolute inset-0 opacity-20">
+                <div className="absolute top-0 right-0 w-48 h-48 md:w-96 md:h-96 bg-white rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute bottom-0 left-0 w-36 h-36 md:w-72 md:h-72 bg-yellow-300 rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+              </div>
+              
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-3 md:mb-6">
+                  <div className="flex items-center gap-2 md:gap-4">
+                    <div className="bg-white/20 backdrop-blur-sm p-2 md:p-4 rounded-xl md:rounded-2xl">
+                      <Dices className="h-6 w-6 md:h-10 md:w-10 text-white animate-bounce" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl md:text-4xl font-black text-white tracking-tight">🎲 Dice Match</h2>
+                      <p className="text-orange-100 font-medium text-xs md:text-lg">Roll, Match, Chat or Lose!</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Compact Instructions for Mobile */}
+                <div className="bg-white/10 backdrop-blur-md rounded-xl md:rounded-2xl p-3 md:p-6 border-2 border-white/30">
+                  <h3 className="text-white font-bold text-sm md:text-xl mb-2 md:mb-3">⚡ How It Works:</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+                    <div className="bg-white/10 rounded-lg md:rounded-xl p-2 md:p-4">
+                      <div className="text-xl md:text-3xl mb-1 md:mb-2">🎲</div>
+                      <div className="text-white font-bold text-xs md:text-base mb-0.5 md:mb-1">1. Roll Dice</div>
+                      <div className="text-orange-100 text-[10px] md:text-sm">Get random 1-6 daily</div>
+                    </div>
+                    <div className="bg-white/10 rounded-lg md:rounded-xl p-2 md:p-4">
+                      <div className="text-xl md:text-3xl mb-1 md:mb-2">👥</div>
+                      <div className="text-white font-bold text-xs md:text-base mb-0.5 md:mb-1">2. See Matches</div>
+                      <div className="text-orange-100 text-[10px] md:text-sm">Users with your number</div>
+                    </div>
+                    <div className="bg-white/10 rounded-lg md:rounded-xl p-2 md:p-4">
+                      <div className="text-xl md:text-3xl mb-1 md:mb-2">⚡</div>
+                      <div className="text-white font-bold text-xs md:text-base mb-0.5 md:mb-1">3. Pick One</div>
+                      <div className="text-orange-100 text-[10px] md:text-sm">Instant friend, no wait</div>
+                    </div>
+                    <div className="bg-white/10 rounded-lg md:rounded-xl p-2 md:p-4">
+                      <div className="text-xl md:text-3xl mb-1 md:mb-2">💬</div>
+                      <div className="text-white font-bold text-xs md:text-base mb-0.5 md:mb-1">4. Chat Now</div>
+                      <div className="text-orange-100 text-[10px] md:text-sm">24h or lose friend</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Notifications - Show who selected you */}
+            {diceSelectionNotifications.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold text-gray-800">🎉 Someone selected you!</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {diceSelectionNotifications.map((notification) => (
+                    <Card key={notification.id} className="border-2 border-orange-300 bg-orange-50 hover:shadow-xl transition-all">
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-16 h-16 rounded-full overflow-hidden bg-gradient-to-br from-purple-100 to-pink-100">
+                            {notification.photo_url ? (
+                              <img src={notification.photo_url} alt={notification.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <User className="h-8 w-8 text-purple-300" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-bold text-gray-800">{notification.name}</h4>
+                            <p className="text-sm text-gray-600">{notification.department} • Year {notification.year}</p>
+                          </div>
+                          <div className="bg-gradient-to-br from-orange-500 to-pink-600 rounded-full p-2">
+                            <div className="text-lg font-black text-white">{notification.diceNumber}</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => {
+                              setSelectedNotification(notification)
+                              setShowDiceNotificationModal(true)
+                            }}
+                            className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-sm"
+                          >
+                            View Profile
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              setDiceSelectionNotifications(prev => prev.filter(n => n.id !== notification.id))
+                              toast.success('Notification dismissed')
+                            }}
+                            variant="outline"
+                            className="text-sm"
+                          >
+                            Dismiss
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Dice Roll Section */}
+            {!diceRolled ? (
+              <div className="max-w-2xl mx-auto">
+                <Card className="border-4 border-orange-200 shadow-2xl">
+                  <CardContent className="p-12 text-center">
+                    {showDiceAnimation ? (
+                      <div className="space-y-6">
+                        <div className="text-8xl animate-bounce">🎲</div>
+                        <p className="text-2xl font-bold text-gray-700">Rolling...</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="text-8xl">🎲</div>
+                        <h3 className="text-3xl font-black bg-gradient-to-r from-orange-600 to-pink-600 bg-clip-text text-transparent">
+                          Ready to Roll?
+                        </h3>
+                        <p className="text-gray-600 text-lg max-w-md mx-auto">
+                          Roll the dice once today and discover your random matches! Select one person to become instant friends.
+                        </p>
+                        <Button
+                          onClick={rollDice}
+                          disabled={isRolling}
+                          className="px-12 py-6 text-xl font-bold bg-gradient-to-r from-orange-500 to-pink-600 hover:from-orange-600 hover:to-pink-700 transform hover:scale-105 transition-all shadow-xl"
+                        >
+                          <Dices className="h-6 w-6 mr-2" />
+                          Roll the Dice! 🎲
+                        </Button>
+                        <p className="text-sm text-gray-500">One roll per day • Choose wisely!</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            ) : hasSelectedMatch ? (
+              <div className="max-w-2xl mx-auto">
+                <Card className="border-4 border-green-200 shadow-2xl">
+                  <CardContent className="p-12 text-center">
+                    <div className="space-y-6">
+                      <div className="text-8xl">✅</div>
+                      <h3 className="text-3xl font-black text-green-600">Match Selected!</h3>
+                      <p className="text-gray-600 text-lg">
+                        You've already selected your match for today. Check your Friends tab and start chatting within 24 hours!
+                      </p>
+                      <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4">
+                        <p className="text-sm font-bold text-yellow-800">⏰ Remember: Chat within 24 hours or you'll be auto-unmatched!</p>
+                      </div>
+                      <Button
+                        onClick={() => {
+                          setMainNav('home')
+                          setActiveTab('matches')
+                        }}
+                        className="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+                      >
+                        Go to Friends
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Your Number */}
+                <Card className="border-4 border-orange-200 shadow-xl">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="bg-gradient-to-br from-orange-500 to-pink-600 rounded-2xl p-6 shadow-lg">
+                          <div className="text-6xl font-black text-white">{myDiceNumber}</div>
+                        </div>
+                        <div>
+                          <h3 className="text-2xl font-black text-gray-800">You Rolled: {myDiceNumber}</h3>
+                          <p className="text-gray-600">{diceMatches.length} {diceMatches.length === 1 ? 'person' : 'people'} rolled the same number</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-orange-600">🎲 Daily Roll Used</p>
+                        <p className="text-xs text-gray-500">Come back tomorrow!</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Matches Grid */}
+                {diceMatches.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-12 text-center">
+                      <div className="text-6xl mb-4">😔</div>
+                      <p className="text-xl font-bold text-gray-700 mb-2">No matches yet</p>
+                      <p className="text-gray-500">No one else rolled {myDiceNumber} today. Check back later!</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {diceMatches.map((profile) => (
+                      <Card key={profile.id} className="border-2 border-purple-200 hover:border-orange-400 hover:shadow-2xl transition-all transform hover:scale-105">
+                        <CardContent className="p-6">
+                          {/* Profile Picture */}
+                          <div className="relative mb-4">
+                            <div className="w-full aspect-square rounded-2xl overflow-hidden bg-gradient-to-br from-purple-100 to-pink-100">
+                              {profile.photo_url ? (
+                                <img 
+                                  src={profile.photo_url} 
+                                  alt={profile.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <User className="h-24 w-24 text-purple-300" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="absolute -top-2 -right-2 bg-gradient-to-br from-orange-500 to-pink-600 rounded-full p-3 shadow-lg">
+                              <div className="text-2xl font-black text-white">{myDiceNumber}</div>
+                            </div>
+                          </div>
+
+                          {/* Profile Info */}
+                          <h3 className="text-xl font-bold text-gray-800 mb-1">{profile.name}</h3>
+                          <p className="text-sm text-gray-500 mb-2">{profile.department} • Year {profile.year}</p>
+                          
+                          {profile.bio && (
+                            <p className="text-sm text-gray-600 mb-4 line-clamp-2">{profile.bio}</p>
+                          )}
+
+                          {profile.interests && profile.interests.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-4">
+                              {profile.interests.slice(0, 3).map((interest, idx) => (
+                                <Badge key={idx} variant="secondary" className="text-xs">
+                                  {interest}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Select Button */}
+                          <Button
+                            onClick={() => selectDiceMatch(profile)}
+                            className="w-full bg-gradient-to-r from-orange-500 to-pink-600 hover:from-orange-600 hover:to-pink-700 font-bold shadow-lg transform hover:scale-105 transition-all"
+                          >
+                            ⚡ Select & Instant Match
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Dice Selection Notification Modal */}
+        {showDiceNotificationModal && selectedNotification && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <Card className="max-w-2xl w-full max-h-[90vh] overflow-y-auto border-4 border-orange-300 shadow-2xl">
+              <CardHeader className="bg-gradient-to-r from-orange-500 to-pink-600 text-white sticky top-0 z-10">
+                <CardTitle className="text-2xl font-black flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="h-6 w-6" />
+                    {selectedNotification.name} selected you!
+                  </span>
+                  <button
+                    onClick={() => {
+                      setShowDiceNotificationModal(false)
+                      setSelectedNotification(null)
+                    }}
+                    className="text-white hover:bg-white/20 rounded-full p-1"
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6 space-y-4">
+                {/* Profile Picture */}
+                <div className="relative">
+                  <div className="w-full aspect-square max-w-sm mx-auto rounded-2xl overflow-hidden bg-gradient-to-br from-purple-100 to-pink-100">
+                    {selectedNotification.photo_url ? (
+                      <img src={selectedNotification.photo_url} alt={selectedNotification.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <User className="h-32 w-32 text-purple-300" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="absolute -top-2 -right-2 bg-gradient-to-br from-orange-500 to-pink-600 rounded-full p-4 shadow-lg">
+                    <div className="text-3xl font-black text-white">{selectedNotification.diceNumber}</div>
+                  </div>
+                </div>
+
+                {/* Profile Info */}
+                <div className="text-center">
+                  <h3 className="text-2xl font-bold text-gray-800 mb-2">{selectedNotification.name}</h3>
+                  <p className="text-gray-600 mb-4">{selectedNotification.department} • Year {selectedNotification.year}</p>
+                </div>
+
+                {selectedNotification.bio && (
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <h4 className="font-bold text-gray-800 mb-2">Bio</h4>
+                    <p className="text-gray-700">{selectedNotification.bio}</p>
+                  </div>
+                )}
+
+                {selectedNotification.interests && selectedNotification.interests.length > 0 && (
+                  <div className="bg-purple-50 rounded-xl p-4">
+                    <h4 className="font-bold text-gray-800 mb-2">Interests</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedNotification.interests.map((interest, idx) => (
+                        <Badge key={idx} variant="secondary" className="text-sm">
+                          {interest}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedNotification.hobbies && selectedNotification.hobbies.length > 0 && (
+                  <div className="bg-pink-50 rounded-xl p-4">
+                    <h4 className="font-bold text-gray-800 mb-2">Hobbies</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedNotification.hobbies.map((hobby, idx) => (
+                        <Badge key={idx} className="bg-pink-200 text-pink-800 text-sm">
+                          {hobby}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4 space-y-2">
+                  <p className="font-bold text-green-800 text-center">✅ You're now friends!</p>
+                  <p className="text-sm text-green-700 text-center">Go to Friends tab to start chatting. Remember: chat within 24 hours!</p>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => {
+                      setShowDiceNotificationModal(false)
+                      setSelectedNotification(null)
+                      setDiceSelectionNotifications(prev => prev.filter(n => n.id !== selectedNotification.id))
+                    }}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setShowDiceNotificationModal(false)
+                      setSelectedNotification(null)
+                      setMainNav('home')
+                      setActiveTab('matches')
+                      toast.success('Opening Friends tab...')
+                    }}
+                    className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 font-bold"
+                  >
+                    💬 Go to Chat
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Dice Confirmation Modal */}
+        {showConfirmModal && selectedDiceProfile && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <Card className="max-w-md w-full border-4 border-orange-300 shadow-2xl">
+              <CardHeader className="bg-gradient-to-r from-orange-500 to-pink-600 text-white">
+                <CardTitle className="text-2xl font-black flex items-center gap-2">
+                  <AlertTriangle className="h-6 w-6" />
+                  Confirm Selection
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6 space-y-4">
+                <div className="text-center">
+                  <div className="w-24 h-24 mx-auto mb-4 rounded-full overflow-hidden bg-gradient-to-br from-purple-100 to-pink-100">
+                    {selectedDiceProfile.photo_url ? (
+                      <img src={selectedDiceProfile.photo_url} alt={selectedDiceProfile.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <User className="h-12 w-12 text-purple-300" />
+                      </div>
+                    )}
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">{selectedDiceProfile.name}</h3>
+                  <p className="text-gray-600 mb-4">{selectedDiceProfile.department} • Year {selectedDiceProfile.year}</p>
+                </div>
+
+                <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-4 space-y-2">
+                  <p className="font-bold text-yellow-800 text-center">⚠️ Important Rules:</p>
+                  <ul className="text-sm text-yellow-700 space-y-1">
+                    <li>✅ You become friends INSTANTLY (no request)</li>
+                    <li>✅ You can select only ONE person per day</li>
+                    <li>⏰ You MUST chat within 24 hours</li>
+                    <li>❌ If you don't chat, you'll be AUTO-UNMATCHED</li>
+                  </ul>
+                </div>
+
+                <p className="text-center font-bold text-gray-700">Are you sure you want to select this person?</p>
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => {
+                      setShowConfirmModal(false)
+                      setSelectedDiceProfile(null)
+                    }}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={confirmDiceMatch}
+                    className="flex-1 bg-gradient-to-r from-orange-500 to-pink-600 hover:from-orange-600 hover:to-pink-700 font-bold"
+                  >
+                    Yes, Select!
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
       </div>

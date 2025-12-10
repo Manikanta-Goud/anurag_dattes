@@ -70,7 +70,7 @@ async function fixOrphanedUsers() {
             roll_number: rollNumber,
             branch: branch,
             year: academicYear,
-            gender: 'Other',
+            gender: 'prefer_not_to_say',
             age: 18,
             is_verified: false,
             is_active: true

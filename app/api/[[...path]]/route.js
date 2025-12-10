@@ -111,7 +111,7 @@ async function handleSignup(request) {
         roll_number: rollNumber,
         branch: branch,
         year: academicYear,
-        gender: 'Other',
+        gender: 'prefer_not_to_say',
         age: 18,
         is_verified: false,
         is_active: true
@@ -452,7 +452,7 @@ async function handleCreateProfileFromClerk(request) {
         roll_number: rollNumber,
         branch: branch,
         year: academicYear,
-        gender: 'Other',
+        gender: 'prefer_not_to_say',
         age: 18,
         is_verified: true, // Clerk handles email verification
         is_active: true
@@ -2285,6 +2285,393 @@ async function handleClaimBonusReward(request) {
   }
 }
 
+// 🎲 FOMO DICE FEATURE HANDLERS
+
+// Roll the dice (once per day)
+async function handleRollDice(request) {
+  try {
+    const { userId } = await request.json()
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+
+    // Check if user already rolled today
+    const { data: existingRoll } = await supabaseAdmin
+      .from('dice_rolls')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('roll_date', today)
+      .single()
+
+    if (existingRoll) {
+      return NextResponse.json({
+        alreadyRolled: true,
+        roll: existingRoll,
+        message: 'You already rolled today! Come back tomorrow.'
+      })
+    }
+
+    // Generate truly random number 1-6
+    const diceNumber = Math.floor(Math.random() * 6) + 1
+
+    // Save the roll
+    const { data: newRoll, error } = await supabaseAdmin
+      .from('dice_rolls')
+      .insert({
+        user_id: userId,
+        dice_number: diceNumber,
+        roll_date: today
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    console.log(`🎲 User ${userId} rolled: ${diceNumber}`)
+
+    return NextResponse.json({
+      success: true,
+      roll: newRoll,
+      diceNumber,
+      message: `You rolled a ${diceNumber}! 🎲`
+    })
+  } catch (error) {
+    console.error('❌ Roll dice error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Get users who rolled the same number today
+async function handleGetDiceMatches(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+
+    // Get user's roll for today
+    const { data: myRoll, error: myRollError } = await supabaseAdmin
+      .from('dice_rolls')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('roll_date', today)
+      .single()
+
+    if (myRollError || !myRoll) {
+      return NextResponse.json({
+        hasRolled: false,
+        matches: [],
+        message: 'You haven\'t rolled today yet!'
+      })
+    }
+
+    // Get all users who rolled the same number today (excluding current user)
+    const { data: matchingRolls, error: matchError } = await supabaseAdmin
+      .from('dice_rolls')
+      .select('user_id, dice_number, rolled_at, has_selected_match')
+      .eq('roll_date', today)
+      .eq('dice_number', myRoll.dice_number)
+      .neq('user_id', userId)
+
+    if (matchError) throw matchError
+
+    // Get profile details for matched users
+    const matchesWithProfiles = await Promise.all(
+      (matchingRolls || []).map(async (roll) => {
+        const { data: profile } = await supabaseAdmin
+          .from('profiles')
+          .select('id, name, bio, age, gender, branch, year, interests, hobbies, profile_picture, instagram')
+          .eq('id', roll.user_id)
+          .single()
+
+        return {
+          ...profile,
+          photo_url: profile?.profile_picture,
+          department: profile?.branch,
+          diceNumber: roll.dice_number,
+          rolledAt: roll.rolled_at,
+          hasSelectedMatch: roll.has_selected_match
+        }
+      })
+    )
+
+    console.log(`🎲 Found ${matchesWithProfiles.length} users who rolled ${myRoll.dice_number}`)
+
+    return NextResponse.json({
+      hasRolled: true,
+      myDiceNumber: myRoll.dice_number,
+      hasSelectedMatch: myRoll.has_selected_match,
+      matches: matchesWithProfiles.filter(m => m !== null),
+      message: `${matchesWithProfiles.length} users rolled ${myRoll.dice_number} today!`
+    })
+  } catch (error) {
+    console.error('❌ Get dice matches error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Select a match (with double confirmation)
+async function handleSelectDiceMatch(request) {
+  try {
+    const { userId, selectedUserId } = await request.json()
+
+    if (!userId || !selectedUserId) {
+      return NextResponse.json(
+        { error: 'Both user IDs are required' },
+        { status: 400 }
+      )
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+
+    // Check if user already selected someone today
+    const { data: myRoll } = await supabaseAdmin
+      .from('dice_rolls')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('roll_date', today)
+      .single()
+
+    if (!myRoll) {
+      return NextResponse.json(
+        { error: 'You haven\'t rolled the dice today!' },
+        { status: 400 }
+      )
+    }
+
+    if (myRoll.has_selected_match) {
+      return NextResponse.json(
+        { error: 'You already selected someone today!' },
+        { status: 400 }
+      )
+    }
+
+    // Check if selected user rolled the same number
+    const { data: theirRoll } = await supabaseAdmin
+      .from('dice_rolls')
+      .select('*')
+      .eq('user_id', selectedUserId)
+      .eq('roll_date', today)
+      .single()
+
+    if (!theirRoll || theirRoll.dice_number !== myRoll.dice_number) {
+      return NextResponse.json(
+        { error: 'This user didn\'t roll the same number!' },
+        { status: 400 }
+      )
+    }
+
+    // Check if they're already friends
+    const { data: existingMatch } = await supabaseAdmin
+      .from('matches')
+      .select('id')
+      .or(`and(user1id.eq.${userId},user2id.eq.${selectedUserId}),and(user1id.eq.${selectedUserId},user2id.eq.${userId})`)
+      .single()
+
+    if (existingMatch) {
+      return NextResponse.json(
+        { error: 'You are already friends with this user!' },
+        { status: 400 }
+      )
+    }
+
+    // Mark user as having selected a match
+    await supabaseAdmin
+      .from('dice_rolls')
+      .update({
+        has_selected_match: true,
+        selected_user_id: selectedUserId
+      })
+      .eq('user_id', userId)
+
+    // Create instant match (no friend request needed!)
+    const [user1Id, user2Id] = [userId, selectedUserId].sort()
+    
+    const { data: newMatch, error: matchError } = await supabaseAdmin
+      .from('matches')
+      .insert({
+        user1id: user1Id,
+        user2id: user2Id
+      })
+      .select()
+      .single()
+
+    if (matchError) throw matchError
+
+    // Create dice match record (expires in 24 hours)
+    const expiresAt = new Date()
+    expiresAt.setHours(expiresAt.getHours() + 24)
+
+    const { data: diceMatch, error: diceMatchError } = await supabaseAdmin
+      .from('dice_matches')
+      .insert({
+        user1_id: user1Id,
+        user2_id: user2Id,
+        dice_number: myRoll.dice_number,
+        expires_at: expiresAt.toISOString()
+      })
+      .select()
+      .single()
+
+    if (diceMatchError) throw diceMatchError
+
+    console.log(`🎲 Instant match created! Users: ${userId} + ${selectedUserId}`)
+
+    return NextResponse.json({
+      success: true,
+      match: newMatch,
+      diceMatch,
+      message: 'Instant match! You have 24 hours to chat or you\'ll be unmatched!',
+      expiresAt: expiresAt.toISOString()
+    })
+  } catch (error) {
+    console.error('❌ Select dice match error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Mark dice match as chatted (to prevent auto-unmatch)
+async function handleMarkDiceMatchChatted(request) {
+  try {
+    const { userId, matchedUserId } = await request.json()
+
+    const [user1Id, user2Id] = [userId, matchedUserId].sort()
+
+    // Update dice match to mark as chatted
+    const { error } = await supabaseAdmin
+      .from('dice_matches')
+      .update({ has_chatted: true })
+      .eq('user1_id', user1Id)
+      .eq('user2_id', user2Id)
+      .eq('is_active', true)
+
+    if (error) throw error
+
+    console.log(`💬 Dice match marked as chatted: ${userId} + ${matchedUserId}`)
+
+    return NextResponse.json({
+      success: true,
+      message: 'Great! You\'re now permanent friends since you chatted!'
+    })
+  } catch (error) {
+    console.error('❌ Mark dice match chatted error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Get active dice matches (to show expiry timer)
+async function handleGetActiveDiceMatches(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const { data: diceMatches, error } = await supabaseAdmin
+      .from('dice_matches')
+      .select('*')
+      .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    return NextResponse.json({
+      diceMatches: diceMatches || []
+    })
+  } catch (error) {
+    console.error('❌ Get active dice matches error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+// Get who selected you in dice
+async function handleGetWhoSelectedMe(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const userId = searchParams.get('userId')
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+
+    // Find rolls where someone selected this user today
+    const { data: selectionsToday, error } = await supabaseAdmin
+      .from('dice_rolls')
+      .select('user_id, dice_number, selected_user_id')
+      .eq('selected_user_id', userId)
+      .eq('roll_date', today)
+
+    if (error) throw error
+
+    // Get profiles of users who selected you
+    const selectionsWithProfiles = await Promise.all(
+      (selectionsToday || []).map(async (selection) => {
+        const { data: profile } = await supabaseAdmin
+          .from('profiles')
+          .select('id, name, bio, age, gender, branch, year, interests, hobbies, profile_picture')
+          .eq('id', selection.user_id)
+          .single()
+
+        return {
+          ...profile,
+          photo_url: profile?.profile_picture,
+          department: profile?.branch,
+          diceNumber: selection.dice_number
+        }
+      })
+    )
+
+    return NextResponse.json({
+      selections: selectionsWithProfiles.filter(s => s !== null)
+    })
+  } catch (error) {
+    console.error('❌ Get who selected me error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
+
 // Main router
 export async function GET(request) {
   const pathname = new URL(request.url).pathname
@@ -2323,6 +2710,12 @@ export async function GET(request) {
     return handleGetPendingRequests(request)
   } else if (pathname.includes('/api/blocked-users')) {
     return handleGetBlockedUsers(request)
+  } else if (pathname.includes('/api/dice/matches')) {
+    return handleGetDiceMatches(request)
+  } else if (pathname.includes('/api/dice/active-matches')) {
+    return handleGetActiveDiceMatches(request)
+  } else if (pathname.includes('/api/dice/who-selected-me')) {
+    return handleGetWhoSelectedMe(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -2377,6 +2770,12 @@ export async function POST(request) {
     return handleRemoveFriend(request)
   } else if (pathname.includes('/api/claim-bonus-reward')) {
     return handleClaimBonusReward(request)
+  } else if (pathname.includes('/api/dice/roll')) {
+    return handleRollDice(request)
+  } else if (pathname.includes('/api/dice/select')) {
+    return handleSelectDiceMatch(request)
+  } else if (pathname.includes('/api/dice/mark-chatted')) {
+    return handleMarkDiceMatchChatted(request)
   }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 })
