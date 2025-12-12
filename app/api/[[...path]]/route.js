@@ -1212,8 +1212,8 @@ async function handleSendWarning(request) {
       )
     }
 
-    // FIXED: Use correct column names (user_id instead of userId, reason instead of message)
-    const { data: warning, error } = await supabase
+    // FIXED: Use supabaseAdmin (service role) to bypass RLS
+    const { data: warning, error } = await supabaseAdmin
       .from('warnings')
       .insert({
         user_id: userId,
@@ -1226,7 +1226,7 @@ async function handleSendWarning(request) {
 
     if (error) throw error
 
-    const { data: allWarnings, error: countError } = await supabase
+    const { data: allWarnings, error: countError } = await supabaseAdmin
       .from('warnings')
       .select('id')
       .eq('user_id', userId)
@@ -1237,14 +1237,14 @@ async function handleSendWarning(request) {
 
     // Auto-ban if user has 5 or more warnings
     if (warningCount >= 5) {
-      const { data: existingBan } = await supabase
+      const { data: existingBan } = await supabaseAdmin
         .from('banned_users')
         .select('*')
         .eq('user_id', userId)
         .single()
 
       if (!existingBan) {
-        await supabase
+        await supabaseAdmin
           .from('banned_users')
           .insert({
             user_id: userId,
