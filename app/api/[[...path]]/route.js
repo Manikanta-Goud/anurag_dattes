@@ -1086,6 +1086,7 @@ async function handleAdminGetUsers(request) {
         ...user,
         photo_url: user.profile_picture,
         department: user.branch,
+        createdAt: user.createdAt || user.created_at || user.clerk_created_at || new Date().toISOString(),
         matchCount: matchCount || 0,
         likesSent: likesSent || 0,
         likesReceived: likesReceived || 0,
@@ -1174,11 +1175,26 @@ async function handleAdminGetStats(request) {
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
-    const { data: newUsers } = await supabaseAdmin
+    // Get all users and filter by date (fallback approach for compatibility)
+    const { data: allProfiles } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .gte('created_at', sevenDaysAgo.toISOString())
-      .order('created_at', { ascending: false })
+      .order('createdAt', { ascending: false })
+      .limit(100)
+
+    // Filter new users and ensure createdAt is properly mapped
+    const newUsersWithDate = (allProfiles || [])
+      .map(user => ({
+        ...user,
+        photo_url: user.profile_picture || user.photo_url,
+        department: user.branch || user.department,
+        createdAt: user.createdAt || user.created_at || new Date().toISOString()
+      }))
+      .filter(user => {
+        const userDate = new Date(user.createdAt)
+        return userDate >= sevenDaysAgo && !isNaN(userDate.getTime())
+      })
+      .slice(0, 50)
 
     const onlineCount = onlineUsers.size
 
@@ -1188,7 +1204,7 @@ async function handleAdminGetStats(request) {
         totalMatches: totalMatches || 0,
         totalMessages: totalMessages || 0,
         totalLikes: totalLikes || 0,
-        newUsers: newUsers || [],
+        newUsers: newUsersWithDate,
         onlineUsers: onlineCount
       }
     })
