@@ -2186,8 +2186,8 @@ export default function App() {
               <h1 className="text-6xl font-bold mb-4 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 bg-clip-text text-transparent">
                 Anurag Connect
               </h1>
-              <p className="text-2xl text-gray-600 mb-2">Find Your Campus Match</p>
-              <p className="text-lg text-gray-500 mb-8">Exclusive dating platform for Anurag University students</p>
+              <p className="text-2xl text-gray-600 mb-2">Connect with Your Campus Community</p>
+              <p className="text-lg text-gray-500 mb-8">Professional networking platform for Anurag University students</p>
               
               {/* Get Started Button - Redirect to Clerk Sign Up */}
               <a href="/sign-up">
@@ -2253,10 +2253,10 @@ export default function App() {
                   <div className="flex justify-center mb-4">
                     <Users className="h-12 w-12 text-pink-500" />
                   </div>
-                  <CardTitle className="text-center">Connect with Students</CardTitle>
+                  <CardTitle className="text-center">Network with Peers</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-center text-gray-600">Meet fellow Anurag University students and make meaningful connections</p>
+                  <p className="text-center text-gray-600">Connect with fellow Anurag University students and build professional relationships</p>
                 </CardContent>
               </Card>
 
@@ -2265,10 +2265,10 @@ export default function App() {
                   <div className="flex justify-center mb-4">
                     <Sparkles className="h-12 w-12 text-purple-500" />
                   </div>
-                  <CardTitle className="text-center">Smart Matching</CardTitle>
+                  <CardTitle className="text-center">Smart Connections</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-center text-gray-600">Find matches based on interests, department, and year</p>
+                  <p className="text-center text-gray-600">Find connections based on department, interests, and academic year</p>
                 </CardContent>
               </Card>
 
@@ -2277,10 +2277,10 @@ export default function App() {
                   <div className="flex justify-center mb-4">
                     <MessageCircle className="h-12 w-12 text-blue-500" />
                   </div>
-                  <CardTitle className="text-center">Chat & Connect</CardTitle>
+                  <CardTitle className="text-center">Collaborate & Communicate</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-center text-gray-600">Start conversations with your matches instantly</p>
+                  <p className="text-center text-gray-600">Start conversations and collaborate on projects with your peers</p>
                 </CardContent>
               </Card>
             </div>
