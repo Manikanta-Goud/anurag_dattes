@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star, Dices } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star, Dices, Trophy, Award } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -71,6 +71,11 @@ export default function App() {
   const [showEventDetails, setShowEventDetails] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState(new Set())
   const [blockedUsersList, setBlockedUsersList] = useState([]) // Full profile data
+
+  // Achievements state
+  const [achievements, setAchievements] = useState([])
+  const [selectedAchievement, setSelectedAchievement] = useState(null)
+  const [showAchievementDetails, setShowAchievementDetails] = useState(false)
 
   // Leaderboard state
   const [leaderboardData, setLeaderboardData] = useState([])
@@ -157,6 +162,7 @@ export default function App() {
           loadFriendRequests(data.profile.id)
           loadBlockedUsers(data.profile.id)
           loadEvents()
+          loadAchievements()
         } else {
           // Profile doesn't exist - pre-fill form with Clerk data
           console.log('❌ No profile found - showing setup page')
@@ -737,6 +743,18 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to load events:', error)
+    }
+  }
+
+  const loadAchievements = async () => {
+    try {
+      const response = await fetch('/api/achievements')
+      const data = await response.json()
+      if (response.ok) {
+        setAchievements(data.achievements || [])
+      }
+    } catch (error) {
+      console.error('Failed to load achievements:', error)
     }
   }
 
@@ -3657,6 +3675,19 @@ export default function App() {
                   <span className="hidden sm:inline">Events</span>
                 </button>
 
+                {/* Achievements Button */}
+                <button
+                  onClick={() => setMainNav('achievements')}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
+                    mainNav === 'achievements'
+                      ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 text-white shadow-xl shadow-amber-300/50 scale-105'
+                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-amber-100 hover:to-yellow-100 shadow-md hover:shadow-lg border-2 border-amber-200'
+                  }`}
+                >
+                  <Trophy className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'achievements' ? 'animate-bounce' : ''}`} />
+                  <span className="hidden sm:inline">🏅 Wins</span>
+                </button>
+
                 {/* 🎲 FOMO Dice Button - NEW */}
                 <button
                   onClick={() => {
@@ -5640,6 +5671,244 @@ export default function App() {
                 )}
               </TabsContent>
             </Tabs>
+          </div>
+        )}
+
+        {/* Achievements Section */}
+        {mainNav === 'achievements' && (
+          <div className="space-y-8 animate-fade-in">
+            {/* Achievements Header */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-amber-600 via-yellow-600 to-orange-600 rounded-2xl lg:rounded-3xl p-4 sm:p-5 lg:p-8 shadow-lg lg:shadow-2xl">
+              {/* Animated Background Pattern */}
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-white rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+              </div>
+              
+              <div className="relative z-10">
+                <div className="flex items-start justify-between lg:mb-6">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 lg:mb-3">
+                      <div className="bg-white/20 backdrop-blur-sm p-1.5 sm:p-2 lg:p-3 rounded-lg lg:rounded-2xl">
+                        <Trophy className="h-5 w-5 sm:h-6 sm:w-6 lg:h-8 lg:w-8 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg sm:text-xl lg:text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">Student Achievements</h2>
+                        <p className="text-amber-100 font-medium text-xs sm:text-sm lg:text-base">Celebrating Success & Excellence</p>
+                      </div>
+                    </div>
+                    
+                    {/* Description - Only visible on laptop/PC */}
+                    <p className="hidden lg:block text-white/90 text-lg max-w-2xl">
+                      Discover remarkable achievements of Anurag students across various fields. Get inspired by their success stories!
+                    </p>
+                    
+                    {/* Achievement Stats - Mobile View */}
+                    <div className="flex lg:hidden gap-2 mt-2.5">
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{achievements.length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-amber-100 font-medium">Total</div>
+                      </div>
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30*24*60*60*1000)).length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-yellow-100 font-medium">This Month</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Achievement Stats - Desktop View */}
+                  <div className="hidden lg:flex gap-4">
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{achievements.length}</div>
+                      <div className="text-xs text-amber-100 font-medium">Total</div>
+                    </div>
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30*24*60*60*1000)).length}</div>
+                      <div className="text-xs text-yellow-100 font-medium">This Month</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Achievements Grid */}
+            {achievements.length === 0 ? (
+              <div className="text-center py-20 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-2xl border-2 border-dashed border-amber-200">
+                <div className="relative inline-block mb-6">
+                  <div className="absolute inset-0 bg-amber-400 blur-2xl opacity-20 animate-pulse"></div>
+                  <Trophy className="relative h-20 w-20 mx-auto text-amber-400" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-700 mb-2">No Achievements Yet</h3>
+                <p className="text-gray-500 mb-4">Student achievements will be showcased here!</p>
+              </div>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {achievements.map((achievement) => (
+                  <Card 
+                    key={achievement.id} 
+                    className="group hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden border-2 border-transparent hover:border-amber-300"
+                    onClick={() => {
+                      setSelectedAchievement(achievement)
+                      setShowAchievementDetails(true)
+                    }}
+                  >
+                    {achievement.image_url && (
+                      <div className="relative h-48 overflow-hidden">
+                        <img 
+                          src={achievement.image_url} 
+                          alt={achievement.achievement_title}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                        />
+                        <div className="absolute top-3 right-3 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
+                          {achievement.sector}
+                        </div>
+                      </div>
+                    )}
+                    <CardHeader>
+                      <div className="flex items-start gap-3">
+                        <div className="bg-gradient-to-br from-amber-100 to-yellow-100 p-2 rounded-lg">
+                          <Award className="h-5 w-5 text-amber-600" />
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-lg group-hover:text-amber-600 transition-colors line-clamp-2">
+                            {achievement.achievement_title}
+                          </CardTitle>
+                          <p className="text-sm text-gray-600 mt-1 font-semibold">{achievement.student_name}</p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-600 line-clamp-3 mb-3">
+                        {achievement.description}
+                      </p>
+                      <div className="flex items-center justify-between text-xs text-gray-500">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {new Date(achievement.achievement_date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </div>
+                        {achievement.position && (
+                          <Badge variant="secondary" className="text-xs">
+                            {achievement.position}
+                          </Badge>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Achievement Details Modal */}
+        {showAchievementDetails && selectedAchievement && (
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3 sm:p-4"
+            onClick={() => {
+              setShowAchievementDetails(false)
+              setSelectedAchievement(null)
+            }}
+          >
+            <div 
+              className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {selectedAchievement.image_url && (
+                <div className="relative h-64 md:h-80">
+                  <img 
+                    src={selectedAchievement.image_url} 
+                    alt={selectedAchievement.achievement_title}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-4 right-4">
+                    <Button
+                      onClick={() => {
+                        setShowAchievementDetails(false)
+                        setSelectedAchievement(null)
+                      }}
+                      variant="secondary"
+                      size="sm"
+                      className="rounded-full shadow-lg bg-white/90 hover:bg-white"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              
+              <div className="p-6 space-y-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge className="bg-amber-500">{selectedAchievement.sector}</Badge>
+                    {selectedAchievement.achievement_type && (
+                      <Badge variant="secondary">{selectedAchievement.achievement_type}</Badge>
+                    )}
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+                    {selectedAchievement.achievement_title}
+                  </h2>
+                  <p className="text-xl text-amber-600 font-semibold mb-1">
+                    🎓 {selectedAchievement.student_name}
+                  </p>
+                  {selectedAchievement.position && (
+                    <p className="text-lg text-gray-700 font-medium">
+                      🏆 {selectedAchievement.position}
+                    </p>
+                  )}
+                </div>
+
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Description</h3>
+                  <p className="text-gray-600 whitespace-pre-wrap">
+                    {selectedAchievement.description}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-blue-50 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-blue-600 mb-1">
+                      <Clock className="h-4 w-4" />
+                      <span className="text-xs font-semibold">Date</span>
+                    </div>
+                    <p className="text-sm font-medium text-gray-700">
+                      {new Date(selectedAchievement.achievement_date).toLocaleDateString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </p>
+                  </div>
+
+                  {selectedAchievement.organization && (
+                    <div className="bg-green-50 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-green-600 mb-1">
+                        <Award className="h-4 w-4" />
+                        <span className="text-xs font-semibold">Organization</span>
+                      </div>
+                      <p className="text-sm font-medium text-gray-700">
+                        {selectedAchievement.organization}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={() => {
+                      setShowAchievementDetails(false)
+                      setSelectedAchievement(null)
+                    }}
+                    className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

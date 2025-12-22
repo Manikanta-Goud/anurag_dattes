@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Shield, Users, MessageSquare, Heart, TrendingUp, Eye, LogOut, Search, Clock, Mail, AlertTriangle, X, User, Ban, Trash2, Calendar, Plus, Edit, MapPin, UserCircle } from 'lucide-react'
+import { Shield, Users, MessageSquare, Heart, TrendingUp, Eye, LogOut, Search, Clock, Mail, AlertTriangle, X, User, Ban, Trash2, Calendar, Plus, Edit, MapPin, UserCircle, Trophy, Award } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -71,6 +71,24 @@ export default function AdminPanel() {
     contact_phone: ''
   })
   const [savingEvent, setSavingEvent] = useState(false)
+
+  // Achievements management
+  const [achievements, setAchievements] = useState([])
+  const [showAchievementModal, setShowAchievementModal] = useState(false)
+  const [editingAchievement, setEditingAchievement] = useState(null)
+  const [achievementImagePreview, setAchievementImagePreview] = useState('')
+  const [achievementForm, setAchievementForm] = useState({
+    student_name: '',
+    achievement_title: '',
+    description: '',
+    achievement_date: '',
+    sector: 'CSE',
+    image_url: '',
+    achievement_type: 'Competition',
+    position: '',
+    organization: ''
+  })
+  const [savingAchievement, setSavingAchievement] = useState(false)
 
   // Check if admin is logged in
   useEffect(() => {
@@ -152,6 +170,11 @@ export default function AdminPanel() {
       const eventsRes = await fetch('/api/events?status=all')
       const eventsData = await eventsRes.json()
       setEvents(eventsData.events || [])
+
+      // Load achievements
+      const achievementsRes = await fetch('/api/achievements')
+      const achievementsData = await achievementsRes.json()
+      setAchievements(achievementsData.achievements || [])
     } catch (error) {
       console.error('Error loading admin data:', error)
     }
@@ -263,6 +286,160 @@ export default function AdminPanel() {
       setUploadingEventImage(false)
       toast.error('Failed to upload image: ' + error.message)
       return null
+    }
+  }
+
+  // Achievement image upload handlers
+  const handleAchievementImageSelect = async (file) => {
+    if (!file) return
+    
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file')
+      return
+    }
+
+    if (file.size > 500 * 1024) {
+      toast.error('Image size must be less than 500KB')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setAchievementImagePreview(reader.result)
+      setAchievementForm({...achievementForm, image_url: reader.result})
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleAchievementImageDrop = (e) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (file) handleAchievementImageSelect(file)
+  }
+
+  const handleAchievementImageDragOver = (e) => {
+    e.preventDefault()
+  }
+
+  const uploadAchievementImageToServer = async (base64Image) => {
+    try {
+      const base64Data = base64Image.split(',')[1]
+      const byteCharacters = atob(base64Data)
+      const byteNumbers = new Array(byteCharacters.length)
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i)
+      }
+      const byteArray = new Uint8Array(byteNumbers)
+      const blob = new Blob([byteArray], { type: 'image/jpeg' })
+
+      const fileName = `achievement_${Date.now()}_${Math.random().toString(36).substring(7)}.jpeg`
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('event-photos')
+        .upload(fileName, blob, {
+          contentType: blob.type,
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      const { data: urlData } = supabase.storage
+        .from('event-photos')
+        .getPublicUrl(fileName)
+
+      console.log('✅ Achievement image uploaded:', urlData.publicUrl)
+      return urlData.publicUrl
+
+    } catch (error) {
+      console.error('❌ Achievement image upload error:', error)
+      toast.error('Failed to upload image: ' + error.message)
+      return null
+    }
+  }
+
+  const resetAchievementForm = () => {
+    setAchievementForm({
+      student_name: '',
+      achievement_title: '',
+      description: '',
+      achievement_date: '',
+      sector: 'CSE',
+      image_url: '',
+      achievement_type: 'Competition',
+      position: '',
+      organization: ''
+    })
+    setAchievementImagePreview('')
+    setEditingAchievement(null)
+  }
+
+  const handleSaveAchievement = async () => {
+    if (!achievementForm.student_name || !achievementForm.achievement_title || 
+        !achievementForm.description || !achievementForm.achievement_date || !achievementForm.sector) {
+      toast.error('Please fill in all required fields')
+      return
+    }
+
+    setSavingAchievement(true)
+    
+    try {
+      let finalImageUrl = achievementForm.image_url
+      
+      if (achievementForm.image_url && !achievementForm.image_url.startsWith('http')) {
+        const uploadedUrl = await uploadAchievementImageToServer(achievementForm.image_url)
+        if (!uploadedUrl) {
+          toast.error('Failed to upload image')
+          setSavingAchievement(false)
+          return
+        }
+        finalImageUrl = uploadedUrl
+      }
+
+      const response = await fetch('/api/achievements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...achievementForm,
+          image_url: finalImageUrl,
+          created_by: 'Admin'
+        })
+      })
+
+      if (response.ok) {
+        toast.success('Achievement posted successfully!')
+        setShowAchievementModal(false)
+        resetAchievementForm()
+        loadAdminData()
+      } else {
+        const data = await response.json()
+        toast.error(data.error || 'Failed to post achievement')
+      }
+    } catch (error) {
+      console.error('Error saving achievement:', error)
+      toast.error('Error posting achievement')
+    }
+    
+    setSavingAchievement(false)
+  }
+
+  const handleDeleteAchievement = async (achievementId) => {
+    if (!confirm('Are you sure you want to delete this achievement?')) return
+    
+    try {
+      const response = await fetch(`/api/achievements?id=${achievementId}`, {
+        method: 'DELETE'
+      })
+      
+      if (response.ok) {
+        toast.success('Achievement deleted')
+        loadAdminData()
+      } else {
+        toast.error('Failed to delete achievement')
+      }
+    } catch (error) {
+      console.error('Error deleting achievement:', error)
+      toast.error('Failed to delete achievement')
     }
   }
 
@@ -623,12 +800,61 @@ export default function AdminPanel() {
 
         {/* Tabs */}
         <Tabs defaultValue="users" className="w-full">
-          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-5 mb-8">
+          {/* Desktop TabsList */}
+          <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-6 mb-8">
             <TabsTrigger value="users">All Users</TabsTrigger>
             <TabsTrigger value="new">New Users</TabsTrigger>
             <TabsTrigger value="conversations">Conversations</TabsTrigger>
             <TabsTrigger value="banned">Banned Users</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
+            <TabsTrigger value="achievements">🏅 Achievements</TabsTrigger>
+          </TabsList>
+
+          {/* Mobile TabsList - Zig-Zag Layout */}
+          <TabsList className="md:hidden mb-8 px-3 h-auto flex-col gap-2 bg-transparent">
+            {/* Row 1 - 3 items */}
+            <div className="flex gap-2 justify-center w-full">
+              <TabsTrigger 
+                value="users"
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-blue-50 to-cyan-50 data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-blue-200 data-[state=active]:border-blue-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                All Users
+              </TabsTrigger>
+              <TabsTrigger 
+                value="new"
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-green-50 to-emerald-50 data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-green-200 data-[state=active]:border-green-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                New
+              </TabsTrigger>
+              <TabsTrigger 
+                value="conversations"
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-purple-50 to-pink-50 data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-purple-200 data-[state=active]:border-purple-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                Chats
+              </TabsTrigger>
+            </div>
+            
+            {/* Row 2 - 3 items (centered for zig-zag) */}
+            <div className="flex gap-2 justify-center w-full">
+              <TabsTrigger 
+                value="banned"
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-red-50 to-orange-50 data-[state=active]:from-red-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-red-200 data-[state=active]:border-red-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                Banned
+              </TabsTrigger>
+              <TabsTrigger 
+                value="events"
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-indigo-50 to-blue-50 data-[state=active]:from-indigo-500 data-[state=active]:to-blue-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-indigo-200 data-[state=active]:border-indigo-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                Events
+              </TabsTrigger>
+              <TabsTrigger 
+                value="achievements"
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-amber-50 to-yellow-50 data-[state=active]:from-amber-500 data-[state=active]:to-yellow-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-amber-200 data-[state=active]:border-amber-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                🏅 Wins
+              </TabsTrigger>
+            </div>
           </TabsList>
 
           {/* All Users Tab */}
@@ -1191,6 +1417,87 @@ export default function AdminPanel() {
                         </div>
                       </div>
                     ))
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Achievements Tab */}
+          <TabsContent value="achievements">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-amber-600">
+                      <Trophy className="h-5 w-5" />
+                      Student Achievements
+                    </CardTitle>
+                    <CardDescription>
+                      Showcase and manage student achievements across all departments
+                    </CardDescription>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      resetAchievementForm()
+                      setShowAchievementModal(true)
+                    }}
+                    className="bg-amber-600 hover:bg-amber-700"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Achievement
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {achievements.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <Trophy className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg">No achievements posted yet</p>
+                      <p className="text-sm">Add your first student achievement to get started</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                      {achievements.map((achievement) => (
+                        <div key={achievement.id} className="p-4 border-2 border-amber-200 bg-amber-50 rounded-lg">
+                          {achievement.image_url && (
+                            <img 
+                              src={achievement.image_url} 
+                              alt={achievement.achievement_title}
+                              className="w-full h-32 object-cover rounded-lg mb-3"
+                            />
+                          )}
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <Badge className="bg-amber-500">{achievement.sector}</Badge>
+                            {achievement.achievement_type && (
+                              <Badge variant="secondary">{achievement.achievement_type}</Badge>
+                            )}
+                          </div>
+                          <h3 className="font-bold text-lg text-amber-900 mb-1">{achievement.achievement_title}</h3>
+                          <p className="text-sm font-semibold text-gray-700 mb-2">🎓 {achievement.student_name}</p>
+                          {achievement.position && (
+                            <p className="text-sm text-gray-600 mb-2">🏆 {achievement.position}</p>
+                          )}
+                          <p className="text-xs text-gray-600 line-clamp-2 mb-3">{achievement.description}</p>
+                          <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                            <span>📅 {new Date(achievement.achievement_date).toLocaleDateString()}</span>
+                            {achievement.organization && (
+                              <span className="font-semibold">{achievement.organization}</span>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeleteAchievement(achievement.id)}
+                            className="w-full"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               </CardContent>
@@ -2046,6 +2353,204 @@ export default function AdminPanel() {
                   }}
                   variant="outline"
                   disabled={savingEvent}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Achievement Modal */}
+      {showAchievementModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <Card className="w-full max-w-3xl max-h-[90vh] overflow-y-auto my-8">
+            <CardHeader className="bg-gradient-to-r from-amber-500 to-yellow-500 text-white">
+              <CardTitle className="flex items-center gap-2">
+                <Trophy className="h-6 w-6" />
+                Add Student Achievement
+              </CardTitle>
+              <CardDescription className="text-amber-50">
+                Showcase remarkable achievements of Anurag students
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="grid grid-cols-2 gap-4">
+                {/* Student Name */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Student Name *</label>
+                  <input
+                    type="text"
+                    value={achievementForm.student_name}
+                    onChange={(e) => setAchievementForm({...achievementForm, student_name: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="John Doe"
+                  />
+                </div>
+
+                {/* Achievement Title */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Achievement Title *</label>
+                  <input
+                    type="text"
+                    value={achievementForm.achievement_title}
+                    onChange={(e) => setAchievementForm({...achievementForm, achievement_title: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="Won National Hackathon"
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Description *</label>
+                  <textarea
+                    value={achievementForm.description}
+                    onChange={(e) => setAchievementForm({...achievementForm, description: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    rows="3"
+                    placeholder="Detailed description of the achievement..."
+                  />
+                </div>
+
+                {/* Achievement Date */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Achievement Date *</label>
+                  <input
+                    type="date"
+                    value={achievementForm.achievement_date}
+                    onChange={(e) => setAchievementForm({...achievementForm, achievement_date: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                {/* Sector/Department */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Department/Sector *</label>
+                  <select
+                    value={achievementForm.sector}
+                    onChange={(e) => setAchievementForm({...achievementForm, sector: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="CSE">CSE</option>
+                    <option value="AI">AI</option>
+                    <option value="AIML">AIML</option>
+                    <option value="ECE">ECE</option>
+                    <option value="EEE">EEE</option>
+                    <option value="MECH">MECH</option>
+                    <option value="CIVIL">CIVIL</option>
+                    <option value="MBA">MBA</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* Achievement Type */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Achievement Type</label>
+                  <select
+                    value={achievementForm.achievement_type}
+                    onChange={(e) => setAchievementForm({...achievementForm, achievement_type: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="Competition">Competition</option>
+                    <option value="Research">Research</option>
+                    <option value="Sports">Sports</option>
+                    <option value="Cultural">Cultural</option>
+                    <option value="Academic">Academic</option>
+                    <option value="Innovation">Innovation</option>
+                    <option value="Social Service">Social Service</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* Position/Rank */}
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Position/Rank</label>
+                  <input
+                    type="text"
+                    value={achievementForm.position}
+                    onChange={(e) => setAchievementForm({...achievementForm, position: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="1st Place, Winner, Gold Medal"
+                  />
+                </div>
+
+                {/* Organization */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">Organization/Institution</label>
+                  <input
+                    type="text"
+                    value={achievementForm.organization}
+                    onChange={(e) => setAchievementForm({...achievementForm, organization: e.target.value})}
+                    className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="AICTE, IEEE, Government of India, etc."
+                  />
+                </div>
+
+                {/* Image Upload */}
+                <div className="col-span-2">
+                  <label className="text-sm font-semibold text-gray-700 mb-2 block">Achievement Photo</label>
+                  
+                  {!achievementImagePreview ? (
+                    <div
+                      onDrop={handleAchievementImageDrop}
+                      onDragOver={handleAchievementImageDragOver}
+                      className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-amber-400 transition-colors cursor-pointer bg-gray-50"
+                      onClick={() => document.getElementById('achievement-image-input').click()}
+                    >
+                      <div className="flex flex-col items-center gap-3">
+                        <Award className="w-12 h-12 text-gray-400" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Drop achievement photo here or click to browse</p>
+                          <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 500KB</p>
+                        </div>
+                      </div>
+                      <input
+                        id="achievement-image-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleAchievementImageSelect(e.target.files[0])}
+                        className="hidden"
+                      />
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <img 
+                        src={achievementImagePreview} 
+                        alt="Preview"
+                        className="w-full h-48 object-cover rounded-lg"
+                      />
+                      <button
+                        onClick={() => {
+                          setAchievementImagePreview('')
+                          setAchievementForm({...achievementForm, image_url: ''})
+                        }}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <p className="text-xs text-green-600 mt-2 font-medium">✓ Image ready! Will be uploaded when you save.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 mt-6">
+                <Button
+                  onClick={handleSaveAchievement}
+                  disabled={savingAchievement}
+                  className="flex-1 bg-amber-600 hover:bg-amber-700"
+                >
+                  {savingAchievement ? 'Posting...' : 'Post Achievement'}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowAchievementModal(false)
+                    resetAchievementForm()
+                  }}
+                  variant="outline"
+                  disabled={savingAchievement}
                 >
                   Cancel
                 </Button>
