@@ -192,9 +192,9 @@ export default function AdminPanel() {
       return
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size must be less than 5MB')
+    // Validate file size (max 500KB)
+    if (file.size > 500 * 1024) {
+      toast.error('Image size must be less than 500KB')
       return
     }
 
@@ -1861,7 +1861,7 @@ export default function AdminPanel() {
                         </svg>
                         <div>
                           <p className="text-sm font-medium text-gray-700">Drop event poster here or click to browse</p>
-                          <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB</p>
+                          <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 500KB</p>
                         </div>
                       </div>
                       <input

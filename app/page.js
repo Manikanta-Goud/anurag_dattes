@@ -2060,9 +2060,9 @@ export default function App() {
       return
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size should be less than 5MB')
+    // Validate file size (max 500KB)
+    if (file.size > 500 * 1024) {
+      toast.error('Image size should be less than 500KB')
       return
     }
 
@@ -2454,7 +2454,7 @@ export default function App() {
                             {isDragging ? 'Drop your photo here!' : 'Drag and drop your photo'}
                           </p>
                           <p className="text-sm text-gray-500">
-                            Supports: JPG, PNG, GIF (Max 5MB)
+                            Supports: JPG, PNG, GIF (Max 500KB)
                           </p>
                         </div>
                         <div className="flex items-center gap-3 w-full max-w-xs">
@@ -2861,7 +2861,7 @@ export default function App() {
                                   Please upload your REAL photo
                                 </p>
                                 <p className="text-xs text-gray-500 mt-1">
-                                  Supports: JPG, PNG, GIF (Max 5MB)
+                                  Supports: JPG, PNG, GIF (Max 500KB)
                                 </p>
                               </div>
                               <div className="flex items-center gap-3 w-full max-w-xs">
