@@ -75,6 +75,62 @@ export async function POST(request) {
   }
 }
 
+export async function PUT(request) {
+  try {
+    const body = await request.json()
+    const {
+      id,
+      student_name,
+      achievement_title,
+      description,
+      achievement_date,
+      sector,
+      image_url,
+      achievement_type,
+      position,
+      organization
+    } = body
+
+    // Validate required fields
+    if (!id) {
+      return Response.json({ error: 'Achievement ID required' }, { status: 400 })
+    }
+
+    if (!student_name || !achievement_title || !description || !achievement_date || !sector) {
+      return Response.json({ error: 'Missing required fields' }, { status: 400 })
+    }
+
+    // Update achievement
+    const { data: achievement, error } = await supabase
+      .from('achievements')
+      .update({
+        student_name,
+        achievement_title,
+        description,
+        achievement_date,
+        sector,
+        image_url,
+        achievement_type,
+        position,
+        organization,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error updating achievement:', error)
+      return Response.json({ error: error.message }, { status: 500 })
+    }
+
+    return Response.json({ achievement })
+  } catch (error) {
+    console.error('Server error:', error)
+    return Response.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url)

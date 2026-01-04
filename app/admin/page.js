@@ -396,31 +396,53 @@ export default function AdminPanel() {
         finalImageUrl = uploadedUrl
       }
 
+      // Check if we're editing or creating
+      const isEditing = !!editingAchievement
+      
       const response = await fetch('/api/achievements', {
-        method: 'POST',
+        method: isEditing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...achievementForm,
+          id: isEditing ? editingAchievement.id : undefined,
           image_url: finalImageUrl,
           created_by: 'Admin'
         })
       })
 
       if (response.ok) {
-        toast.success('Achievement posted successfully!')
+        toast.success(isEditing ? 'Achievement updated successfully!' : 'Achievement posted successfully!')
         setShowAchievementModal(false)
         resetAchievementForm()
         loadAdminData()
       } else {
         const data = await response.json()
-        toast.error(data.error || 'Failed to post achievement')
+        toast.error(data.error || (isEditing ? 'Failed to update achievement' : 'Failed to post achievement'))
       }
     } catch (error) {
       console.error('Error saving achievement:', error)
-      toast.error('Error posting achievement')
+      toast.error('Error saving achievement')
     }
     
     setSavingAchievement(false)
+  }
+
+  const handleEditAchievement = (achievement) => {
+    // Pre-fill form with existing data
+    setAchievementForm({
+      student_name: achievement.student_name || '',
+      achievement_title: achievement.achievement_title || '',
+      description: achievement.description || '',
+      achievement_date: achievement.achievement_date ? achievement.achievement_date.split('T')[0] : '',
+      sector: achievement.sector || 'CSE',
+      image_url: achievement.image_url || '',
+      achievement_type: achievement.achievement_type || 'Competition',
+      position: achievement.position || '',
+      organization: achievement.organization || ''
+    })
+    setAchievementImagePreview(achievement.image_url || '')
+    setEditingAchievement(achievement)
+    setShowAchievementModal(true)
   }
 
   const handleDeleteAchievement = async (achievementId) => {
@@ -695,9 +717,6 @@ export default function AdminPanel() {
                 {loading ? 'Logging in...' : 'Login as Admin'}
               </Button>
             </form>
-            <div className="mt-4 text-center text-sm text-gray-500">
-              Default credentials: admin / admin123
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -730,7 +749,7 @@ export default function AdminPanel() {
       <div className="container mx-auto px-4 py-8">
         {/* Stats Cards */}
         {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
@@ -757,18 +776,7 @@ export default function AdminPanel() {
               </CardContent>
             </Card>
 
-            <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-gray-600 flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4" />
-                  Total Messages
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-purple-600">{stats.totalMessages}</div>
-                <p className="text-xs text-gray-500 mt-1">Conversations</p>
-              </CardContent>
-            </Card>
+            {/* Total Messages card hidden for privacy */}
 
             <Card className="border-2 border-pink-200 bg-gradient-to-br from-pink-50 to-white">
               <CardHeader className="pb-3">
@@ -801,10 +809,10 @@ export default function AdminPanel() {
         {/* Tabs */}
         <Tabs defaultValue="users" className="w-full">
           {/* Desktop TabsList */}
-          <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-6 mb-8">
+          <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-5 mb-8">
             <TabsTrigger value="users">All Users</TabsTrigger>
             <TabsTrigger value="new">New Users</TabsTrigger>
-            <TabsTrigger value="conversations">Conversations</TabsTrigger>
+            {/* Conversations tab hidden for privacy */}
             <TabsTrigger value="banned">Banned Users</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
             <TabsTrigger value="achievements">🏅 Achievements</TabsTrigger>
@@ -826,22 +834,17 @@ export default function AdminPanel() {
               >
                 New
               </TabsTrigger>
-              <TabsTrigger 
-                value="conversations"
-                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-purple-50 to-pink-50 data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-purple-200 data-[state=active]:border-purple-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
-              >
-                Chats
-              </TabsTrigger>
-            </div>
-            
-            {/* Row 2 - 3 items (centered for zig-zag) */}
-            <div className="flex gap-2 justify-center w-full">
+              {/* Conversations tab hidden for privacy */}
               <TabsTrigger 
                 value="banned"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-red-50 to-orange-50 data-[state=active]:from-red-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-red-200 data-[state=active]:border-red-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
               >
                 Banned
               </TabsTrigger>
+            </div>
+            
+            {/* Row 2 - 2 items (centered) */}
+            <div className="flex gap-2 justify-center w-full">
               <TabsTrigger 
                 value="events"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-indigo-50 to-blue-50 data-[state=active]:from-indigo-500 data-[state=active]:to-blue-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-indigo-200 data-[state=active]:border-indigo-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
@@ -1031,124 +1034,12 @@ export default function AdminPanel() {
             </Card>
           </TabsContent>
 
-          {/* Conversations Tab */}
+          {/* Conversations Tab - HIDDEN FOR PRIVACY (can be re-enabled when needed) */}
+          {/* 
           <TabsContent value="conversations">
-            <div className="grid lg:grid-cols-3 gap-6">
-              {/* Conversations List */}
-              <Card className="lg:col-span-1">
-                <CardHeader>
-                  <CardTitle>Active Conversations</CardTitle>
-                  <CardDescription>
-                    {conversations?.length || 0} total matches
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="max-h-[600px] overflow-y-auto">
-                  <div className="space-y-2">
-                    {(conversations || []).map((conv) => (
-                      <div
-                        key={conv.matchId}
-                        className={`p-4 border rounded-lg transition-colors ${
-                          selectedConversation?.matchId === conv.matchId ? 'bg-purple-100 border-purple-300' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="relative">
-                            <Avatar className="h-12 w-12 border-2 border-purple-200">
-                              <AvatarImage src={conv.user1?.photo_url} />
-                              <AvatarFallback className="text-sm font-medium bg-purple-100">{conv.user1?.name?.charAt(0)}</AvatarFallback>
-                            </Avatar>
-                            {conv.user1Online && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
-                          </div>
-                          <span className="text-sm">↔️</span>
-                          <div className="relative">
-                            <Avatar className="h-12 w-12 border-2 border-purple-200">
-                              <AvatarImage src={conv.user2?.photo_url} />
-                              <AvatarFallback className="text-sm font-medium bg-purple-100">{conv.user2?.name?.charAt(0)}</AvatarFallback>
-                            </Avatar>
-                            {conv.user2Online && <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>}
-                          </div>
-                        </div>
-                        <div className="text-sm font-medium cursor-pointer hover:text-purple-600" onClick={() => viewConversation(conv)}>
-                          {conv.user1?.name} & {conv.user2?.name}
-                        </div>
-                        <div className="flex items-center justify-between mt-2">
-                          <Badge variant="secondary" className="text-xs">
-                            {conv.messageCount} messages
-                          </Badge>
-                          {conv.lastMessage && (
-                            <span className="text-xs text-gray-500">
-                              {new Date(conv.lastMessage.createdAt).toLocaleTimeString()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Messages View */}
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <CardTitle>
-                    {selectedConversation ? (
-                      <div className="flex items-center gap-3">
-                        <Eye className="h-5 w-5" />
-                        Viewing Conversation
-                      </div>
-                    ) : (
-                      'Select a conversation to view'
-                    )}
-                  </CardTitle>
-                  {selectedConversation && (
-                    <CardDescription>
-                      Between {selectedConversation.user1?.name} and {selectedConversation.user2?.name}
-                    </CardDescription>
-                  )}
-                </CardHeader>
-                <CardContent>
-                  {selectedConversation ? (
-                    <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                      {(conversationMessages || []).length === 0 ? (
-                        <div className="text-center py-12 text-gray-500">
-                          <MessageSquare className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                          <p>No messages yet in this conversation</p>
-                        </div>
-                      ) : (
-                        (conversationMessages || []).map((msg) => {
-                          const isSender1 = msg.senderId === selectedConversation.user1?.id
-                          const sender = isSender1 ? selectedConversation.user1 : selectedConversation.user2
-                          
-                          return (
-                            <div key={msg.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                              <Avatar className="h-8 w-8">
-                                <AvatarImage src={sender?.photo_url} />
-                                <AvatarFallback className="text-xs">{sender?.name?.charAt(0)}</AvatarFallback>
-                              </Avatar>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="font-semibold text-sm">{sender?.name}</span>
-                                  <span className="text-xs text-gray-500">
-                                    {new Date(msg.createdAt).toLocaleString()}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-gray-700">{msg.message}</p>
-                              </div>
-                            </div>
-                          )
-                        })
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12 text-gray-500">
-                      <MessageSquare className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                      <p className="text-lg">Select a conversation to view messages</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            ... Conversations content hidden for privacy ...
           </TabsContent>
+          */}
 
           {/* Banned Users Tab */}
           <TabsContent value="banned">
@@ -1486,15 +1377,26 @@ export default function AdminPanel() {
                               <span className="font-semibold">{achievement.organization}</span>
                             )}
                           </div>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDeleteAchievement(achievement.id)}
-                            className="w-full"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEditAchievement(achievement)}
+                              className="flex-1 border-amber-500 text-amber-600 hover:bg-amber-50"
+                            >
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleDeleteAchievement(achievement.id)}
+                              className="flex-1"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2366,13 +2268,13 @@ export default function AdminPanel() {
       {showAchievementModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <Card className="w-full max-w-3xl max-h-[90vh] overflow-y-auto my-8">
-            <CardHeader className="bg-gradient-to-r from-amber-500 to-yellow-500 text-white">
+            <CardHeader className={`text-white ${editingAchievement ? 'bg-gradient-to-r from-blue-500 to-indigo-500' : 'bg-gradient-to-r from-amber-500 to-yellow-500'}`}>
               <CardTitle className="flex items-center gap-2">
-                <Trophy className="h-6 w-6" />
-                Add Student Achievement
+                {editingAchievement ? <Edit className="h-6 w-6" /> : <Trophy className="h-6 w-6" />}
+                {editingAchievement ? 'Edit Achievement' : 'Add Student Achievement'}
               </CardTitle>
-              <CardDescription className="text-amber-50">
-                Showcase remarkable achievements of Anurag students
+              <CardDescription className={editingAchievement ? 'text-blue-50' : 'text-amber-50'}>
+                {editingAchievement ? 'Update the achievement details below' : 'Showcase remarkable achievements of Anurag students'}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6">
@@ -2540,9 +2442,9 @@ export default function AdminPanel() {
                 <Button
                   onClick={handleSaveAchievement}
                   disabled={savingAchievement}
-                  className="flex-1 bg-amber-600 hover:bg-amber-700"
+                  className={`flex-1 ${editingAchievement ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700'}`}
                 >
-                  {savingAchievement ? 'Posting...' : 'Post Achievement'}
+                  {savingAchievement ? (editingAchievement ? 'Updating...' : 'Posting...') : (editingAchievement ? 'Update Achievement' : 'Post Achievement')}
                 </Button>
                 <Button
                   onClick={() => {
