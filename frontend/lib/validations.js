@@ -41,19 +41,67 @@ export const loginSchema = z.object({
 })
 
 export const updateProfileSchema = z.object({
-    userId: z.string().uuid().optional(), // Ideally required, but sometimes implied
+    userId: z.string().uuid().optional(),
     name: z.string().min(2).max(50).optional(),
     bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
     age: z.number().int().min(16).max(100).optional(),
     gender: z.enum(['male', 'female', 'other']).optional(),
     location: z.string().max(100).optional(),
-    instagram: z.string().url().optional().or(z.literal('')),
-    github: z.string().url().optional().or(z.literal('')),
-    linkedin: z.string().url().optional().or(z.literal('')),
+    // Social media URLs - optional, will be validated server-side if provided
+    instagram: z.string().optional().or(z.literal('')),
+    github: z.string().optional().or(z.literal('')),
+    linkedin: z.string().optional().or(z.literal('')),
     interests: z.array(z.string()).optional(),
     hobbies: z.array(z.string()).optional(),
-    department: z.string().optional(),
-    year: z.number().int().min(1).max(5).optional(),
-    photo_url: z.string().url().optional(),
-    profile_picture: z.string().url().optional(),
+    // Department and Year are now REQUIRED
+    department: z.string().min(2, 'Department is required').max(50, 'Department must be less than 50 characters'),
+    year: z.number().int().min(1, 'Year must be between 1 and 5').max(5, 'Year must be between 1 and 5'),
+    photo_url: z.string().optional(),
+    profile_picture: z.string().optional(),
 })
+
+// Helper function to validate social media URLs (to be used server-side)
+export function validateSocialMediaUrl(url, platform) {
+    if (!url || url === '') return { valid: true }
+
+    try {
+        // First check if it's a valid URL format
+        new URL(url)
+
+        // Check platform-specific domain
+        const lowerUrl = url.toLowerCase()
+
+        if (platform === 'instagram') {
+            if (!lowerUrl.includes('instagram.com/')) {
+                return { valid: false, error: 'Instagram link is not valid. Please enter a valid Instagram profile URL (e.g., https://www.instagram.com/username/)' }
+            }
+            // Extract username from Instagram URL
+            const usernameMatch = url.match(/instagram\.com\/([a-zA-Z0-9._]+)/)
+            if (!usernameMatch || usernameMatch[1].length < 1) {
+                return { valid: false, error: 'Instagram username is not valid in the URL' }
+            }
+        } else if (platform === 'github') {
+            if (!lowerUrl.includes('github.com/')) {
+                return { valid: false, error: 'GitHub link is not valid. Please enter a valid GitHub profile URL (e.g., https://github.com/username)' }
+            }
+            // Extract username from GitHub URL
+            const usernameMatch = url.match(/github\.com\/([a-zA-Z0-9_-]+)/)
+            if (!usernameMatch || usernameMatch[1].length < 1) {
+                return { valid: false, error: 'GitHub username is not valid in the URL' }
+            }
+        } else if (platform === 'linkedin') {
+            if (!lowerUrl.includes('linkedin.com/in/')) {
+                return { valid: false, error: 'LinkedIn link is not valid. Please enter a valid LinkedIn profile URL (e.g., https://www.linkedin.com/in/username/)' }
+            }
+            // Extract username from LinkedIn URL
+            const usernameMatch = url.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/)
+            if (!usernameMatch || usernameMatch[1].length < 1) {
+                return { valid: false, error: 'LinkedIn username is not valid in the URL' }
+            }
+        }
+
+        return { valid: true }
+    } catch (e) {
+        return { valid: false, error: `${platform.charAt(0).toUpperCase() + platform.slice(1)} URL format is invalid` }
+    }
+}

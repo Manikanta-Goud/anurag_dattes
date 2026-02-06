@@ -568,6 +568,40 @@ async function handleUpdateProfile(request) {
 
     const { userId, name, bio, age, gender, profile_picture, photo_url, location, instagram, github, linkedin, interests, hobbies, department, year } = validationResult.data
 
+    // Validate social media URLs if provided
+    if (instagram && instagram !== '') {
+      const { validateSocialMediaUrl } = await import('../../../lib/validations')
+      const instagramValidation = validateSocialMediaUrl(instagram, 'instagram')
+      if (!instagramValidation.valid) {
+        return NextResponse.json(
+          { error: instagramValidation.error },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (github && github !== '') {
+      const { validateSocialMediaUrl } = await import('../../../lib/validations')
+      const githubValidation = validateSocialMediaUrl(github, 'github')
+      if (!githubValidation.valid) {
+        return NextResponse.json(
+          { error: githubValidation.error },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (linkedin && linkedin !== '') {
+      const { validateSocialMediaUrl } = await import('../../../lib/validations')
+      const linkedinValidation = validateSocialMediaUrl(linkedin, 'linkedin')
+      if (!linkedinValidation.valid) {
+        return NextResponse.json(
+          { error: linkedinValidation.error },
+          { status: 400 }
+        )
+      }
+    }
+
     // Build update object with only provided fields
     const updateData = {}
     if (name !== undefined) updateData.name = name
@@ -2152,28 +2186,70 @@ async function handleRemoveFriend(request) {
 async function handleGetEvents(request) {
   try {
     const { searchParams } = new URL(request.url)
-    const status = searchParams.get('status') || 'upcoming'
+    const filterStatus = searchParams.get('status') || 'upcoming'
 
-    let query = supabaseAdmin
+    // Fetch ALL events from database
+    const { data, error } = await supabaseAdmin
       .from('events')
       .select('*')
       .order('event_date', { ascending: true })
 
-    if (status !== 'all') {
-      query = query.eq('status', status)
-    }
-
-    const { data, error } = await query
-
     if (error) throw error
 
-    // Map location to venue for frontend compatibility
-    const eventsWithVenue = (data || []).map(event => ({
-      ...event,
-      venue: event.location
-    }))
+    // Get current date and time
+    const now = new Date()
+    const threeDaysAgo = new Date(now)
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
 
-    return NextResponse.json({ events: eventsWithVenue })
+    // Calculate dynamic status for each event based on date/time
+    const eventsWithCalculatedStatus = (data || []).map(event => {
+      // Parse event date and time
+      const eventDate = new Date(event.event_date)
+      const eventDateTime = new Date(`${event.event_date}T${event.event_time}`)
+
+      // Determine event status based on date/time
+      let calculatedStatus = 'upcoming'
+
+      // Check if event date is today
+      const isToday = eventDate.toDateString() === now.toDateString()
+
+      // If event date is in the past (not today)
+      if (eventDate < new Date(now.setHours(0, 0, 0, 0))) {
+        calculatedStatus = 'completed'
+      }
+      // If event is today, mark as ongoing
+      else if (isToday) {
+        calculatedStatus = 'ongoing'
+      }
+      // Otherwise it's upcoming
+      else {
+        calculatedStatus = 'upcoming'
+      }
+
+      return {
+        ...event,
+        venue: event.location,
+        status: calculatedStatus,
+        isRecentPast: eventDate >= threeDaysAgo && calculatedStatus === 'completed'
+      }
+    })
+
+    // Filter events based on requested status
+    let filteredEvents = eventsWithCalculatedStatus
+
+    if (filterStatus === 'upcoming') {
+      filteredEvents = eventsWithCalculatedStatus.filter(e => e.status === 'upcoming')
+    } else if (filterStatus === 'ongoing') {
+      filteredEvents = eventsWithCalculatedStatus.filter(e => e.status === 'ongoing')
+    } else if (filterStatus === 'completed') {
+      // Only show events completed within the last 3 days
+      filteredEvents = eventsWithCalculatedStatus.filter(e => e.isRecentPast)
+    } else if (filterStatus === 'all') {
+      // Show all events
+      filteredEvents = eventsWithCalculatedStatus
+    }
+
+    return NextResponse.json({ events: filteredEvents })
   } catch (error) {
     return NextResponse.json(
       { error: error.message },

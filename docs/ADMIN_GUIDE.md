@@ -3,7 +3,7 @@
 ## Login to Admin Panel
 - URL: http://localhost:3000/admin
 - Username: `admin`
-- Password: `admin123`
+- Password: `admin123`  
 
 ## Sending Warnings to Users
 

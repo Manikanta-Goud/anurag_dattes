@@ -1,0 +1,81 @@
+PROJECT REPORT: ANURAG DATTES
+==================================================
+
+1. PROJECT STRUCTURE
+==================================================
+The project is organized into a clean separation of concerns:
+
+anurag_dattes/
+│
+├── frontend/                   (Next.js 14 Application)
+│   ├── app/                    
+│   │   ├── (auth)/             (Authentication Routes: Sign-in/Sign-up)
+│   │   ├── (protected)/        (Secured Routes: Admin Dashboard)
+│   │   ├── api/                (Backend-for-Frontend API Routes)
+│   │   ├── components/ui/      (Reusable Shadcn UI Components)
+│   │   ├── lib/                (Validation & Utils)
+│   │   └── middleware.js       (Route Protection Logic)
+│
+├── backend/                    (Server-Side Logic)
+│   ├── database/migrations/    (SQL Database Schemas)
+│   ├── lib/                    (Supabase Admin Clients)
+│   └── scripts/                (Maintenance Scripts)
+│
+├── docs/                       (Project Documentation)
+│   └── PROJECT_REPORT.txt
+│
+└── .gitignore                  (Git Configuration)
+
+
+2. KEY IMPLEMENTATION CHANGES (Security & Architecture)
+==================================================
+
+A. Security Hardening (Making the App "Hack-Proof")
+-------------------------------------------------- 
+1. Password Hashing: 
+   - We implemented 'Bcrypt' hashing.
+   - Result: User passwords are never stored in plain text. Even DB admins cannot see them.
+
+2. Rate Limiting:
+   - We added a traffic limiter to API routes.
+   - Rule: Maximum 100 requests per 15 minutes per IP address.
+   - Benefit: Prevents Brute Force attacks and Spam bots.
+
+3. Strict Input Validation (Zod):
+   - Every piece of data (Email, Password, Name) is verified before processing.
+   - Benefit: Prevents SQL Injection and "Bad Data" from entering the system.
+
+B. Professional Code Organization
+--------------------------------------------------
+- "Separation of Concerns": 
+   - UI code is strictly in 'frontend/components'.
+   - Business logic is in 'frontend/lib'.
+   - Database logic is in 'backend'.
+- This ensures the project is scalable and easy to maintain.
+
+
+3. VALIDATION LOGIC (How we verify users)
+==================================================
+We use the 'Zod' library to enforce strict college rules during Registration.
+
+A. College ID (Email)
+--------------------
+- Format: Must end strictly with "@anurag.edu.in".
+- Roll Number: The username part must match the Anurag ID pattern.
+  (Example: '22eg105j13' -> 2 digits + 2 letters + 3 digits + 1 letter + 2 digits)
+
+B. Password Strength
+--------------------
+- Minimum Length: 8 characters.
+- Complexity: Must contain at least:
+  * 1 Uppercase Letter (A-Z)
+  * 1 Lowercase Letter (a-z)
+  * 1 Number (0-9)
+
+C. Name
+--------------------
+- Valid Length: 2 to 50 characters.
+
+--------------------------------------------------
+Report Generated on: Jan 31, 2026
+Verified by: Development Team
