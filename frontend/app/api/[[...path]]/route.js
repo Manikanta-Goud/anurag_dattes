@@ -1,9 +1,173 @@
 import { NextResponse } from 'next/server'
 import { supabase, supabaseAdmin } from '../../../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
-import { clerkClient } from '@clerk/nextjs/server'
+import { clerkClient, getAuth } from '@clerk/nextjs/server'
 import { hashPassword, verifyPassword } from '../../../lib/auth'
 import { signupSchema, loginSchema, updateProfileSchema } from '../../../lib/validations'
+
+// ============================================================
+// 🔒 SECURITY HELPER 1: Verify valid Clerk session exists.
+//    Returns { authorized: true, clerkUserId } or 401 response.
+// ============================================================
+async function requireAuth(request) {
+  try {
+    const { userId } = getAuth(request)
+    if (!userId) {
+      // Log unauthenticated probe attempts
+      await logSecurityEvent(request, {
+        event_type: 'UNAUTHENTICATED_ACCESS',
+        endpoint: new URL(request.url).pathname,
+        details: 'API accessed without any login session',
+        severity: 'medium'
+      })
+      return {
+        authorized: false,
+        response: NextResponse.json(
+          { error: 'Authentication required. Please log in.' },
+          { status: 401 }
+        )
+      }
+    }
+    return { authorized: true, clerkUserId: userId }
+  } catch (err) {
+    console.error('🔒 Auth check failed:', err.message)
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { error: 'Authentication required. Please log in.' },
+        { status: 401 }
+      )
+    }
+  }
+}
+
+// ============================================================
+// � SECURITY HELPER 2: Get caller's full profile from Clerk ID.
+//    Returns profile { id, name, email } or null.
+// ============================================================
+async function getCallerProfile(clerkUserId) {
+  try {
+    const { data: profile, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, name, email')
+      .eq('clerk_user_id', clerkUserId)
+      .single()
+
+    if (error || !profile) return null
+    return profile
+  } catch (err) {
+    console.error('🔒 getCallerProfile error:', err.message)
+    return null
+  }
+}
+
+// ============================================================
+// 📋 SECURITY LOGGER: Records attack attempts to Supabase.
+//    This is how you know WHO is trying to hack your app.
+//    Called automatically by requireOwnership on every block.
+// ============================================================
+async function logSecurityEvent(request, {
+  event_type,       // e.g. 'IDOR_ATTEMPT', 'UNAUTHENTICATED_ACCESS'
+  endpoint,         // e.g. '/api/profiles'
+  attacker_clerk_id = null,    // Clerk user ID of attacker
+  attacker_profile_id = null,  // DB profile ID of attacker
+  attacker_name = null,        // Their display name
+  attacker_email = null,       // Their email address
+  target_user_id = null,       // Whose data they tried to steal
+  details = '',     // Human-readable description
+  severity = 'high' // 'low', 'medium', 'high', 'critical'
+}) {
+  try {
+    const ip = request.headers.get('x-forwarded-for') ||
+      request.headers.get('x-real-ip') ||
+      'unknown'
+    const userAgent = request.headers.get('user-agent') || 'unknown'
+
+    await supabaseAdmin
+      .from('security_logs')
+      .insert({
+        event_type,
+        endpoint,
+        attacker_clerk_id,
+        attacker_profile_id,
+        attacker_name,
+        attacker_email,
+        target_user_id,
+        ip_address: ip,
+        user_agent: userAgent,
+        details,
+        severity,
+        created_at: new Date().toISOString()
+      })
+
+    // Always print to server logs too
+    console.warn(
+      `� SECURITY EVENT [${severity.toUpperCase()}] ${event_type}\n` +
+      `   Endpoint: ${endpoint}\n` +
+      `   Attacker: ${attacker_name || 'Unknown'} (${attacker_email || 'no email'})\n` +
+      `   Clerk ID: ${attacker_clerk_id || 'not logged in'}\n` +
+      `   IP: ${ip}\n` +
+      `   Target userId: ${target_user_id || 'N/A'}\n` +
+      `   Details: ${details}`
+    )
+  } catch (err) {
+    // Never let logging crash the app — just print to console
+    console.error('⚠️ Failed to write security log:', err.message)
+  }
+}
+
+// ============================================================
+// 🔒 SECURITY HELPER 3: Require auth AND verify ownership.
+//    Pass the userId from the request query param/body.
+//    Returns { authorized: true, profileId } if the session
+//    user OWNS that profileId, else logs + returns 403.
+// ============================================================
+async function requireOwnership(request, requestedUserId) {
+  const endpoint = new URL(request.url).pathname
+
+  // Step 1: Must be logged in
+  const authCheck = await requireAuth(request)
+  if (!authCheck.authorized) return authCheck
+
+  // Step 2: Look up full caller profile (name + email) from Clerk ID
+  const callerProfile = await getCallerProfile(authCheck.clerkUserId)
+
+  if (!callerProfile) {
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { error: 'Your profile was not found. Please contact support.' },
+        { status: 403 }
+      )
+    }
+  }
+
+  // Step 3: The userId in the request MUST match the caller's real profile ID
+  if (requestedUserId && requestedUserId !== callerProfile.id) {
+    // 🚨 Log the attack with full identity of the attacker!
+    await logSecurityEvent(request, {
+      event_type: 'IDOR_ATTEMPT',
+      endpoint,
+      attacker_clerk_id: authCheck.clerkUserId,
+      attacker_profile_id: callerProfile.id,
+      attacker_name: callerProfile.name,
+      attacker_email: callerProfile.email,
+      target_user_id: requestedUserId,
+      details: `User "${callerProfile.name}" (${callerProfile.email}) tried to access data belonging to userId: ${requestedUserId}`,
+      severity: 'high'
+    })
+
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { error: 'Forbidden: You can only access your own data.' },
+        { status: 403 }
+      )
+    }
+  }
+
+  return { authorized: true, profileId: callerProfile.id }
+}
 
 // In-memory store for online users (in production, use Redis)
 const onlineUsers = new Map() // userId -> lastSeen timestamp
@@ -25,7 +189,7 @@ setInterval(() => {
 // Rate Limiter (In-Memory)
 const rateLimit = new Map()
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000 // 15 minutes
-const RATE_LIMIT_MAX = 100
+const RATE_LIMIT_MAX = 20
 
 function checkRateLimit(ip) {
   const now = Date.now()
@@ -347,7 +511,12 @@ async function handleGetProfiles(request) {
       )
     }
 
-    console.log('🔍 Fetching all profiles for user:', userId)
+    // 🔒 IDOR PROTECTION: Verify the logged-in user owns this userId
+    // A logged-in attacker cannot fetch profiles using someone else's userId
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
+
+    console.log('🔍 Fetching all profiles for verified user:', userId)
 
     // Get all profiles except current user
     const { data: profiles, error } = await supabase
@@ -386,6 +555,10 @@ async function handleGetProfiles(request) {
 // Get total count of profiles
 async function handleGetProfileCount(request) {
   try {
+    // 🔒 SECURITY FIX: Require authentication - profile count should not be public
+    const authCheck = await requireAuth(request)
+    if (!authCheck.authorized) return authCheck.response
+
     const { count, error } = await supabaseAdmin
       .from('profiles')
       .select('*', { count: 'exact', head: true })
@@ -440,7 +613,12 @@ async function handleCreateProfileFromClerk(request) {
 
     // Extract branch from roll number (YYegDDDSRR format)
     const branchMatch = rollNumber.match(/\d{2}([a-z]{2})\d{3}/i)
-    const branch = branchMatch ? branchMatch[1].toUpperCase() : 'UNKNOWN'
+    let branch = branchMatch ? branchMatch[1].toUpperCase() : 'UNKNOWN'
+
+    // "EG" is not a valid department section, treat as UNKNOWN so user must fix it
+    if (branch === 'EG') {
+      branch = 'UNKNOWN'
+    }
 
     // Extract year from roll number
     const yearPrefix = parseInt(rollNumber.substring(0, 2))
@@ -765,7 +943,7 @@ async function handleLike(request) {
   }
 }
 
-// Get user's likes - FIXED
+// Get user's likes - FIXED + IDOR PROTECTED
 async function handleGetLikes(request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -777,6 +955,10 @@ async function handleGetLikes(request) {
         { status: 400 }
       )
     }
+
+    // 🔒 IDOR: Only you can see your own likes
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
 
     const { data: likes, error } = await supabase
       .from('likes')
@@ -801,7 +983,7 @@ async function handleGetLikes(request) {
   }
 }
 
-// Match Routes - FIXED to use correct column names
+// Match Routes - FIXED + IDOR PROTECTED
 async function handleGetMatches(request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -813,6 +995,10 @@ async function handleGetMatches(request) {
         { status: 400 }
       )
     }
+
+    // 🔒 IDOR: A logged-in user cannot read another user's matches/chat list
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
 
     // Get matches where user is either user1 or user2
     const { data: matches, error } = await supabaseAdmin
@@ -916,9 +1102,13 @@ async function handleGetMatches(request) {
   }
 }
 
-// Message Routes - FIXED to use sender_id and receiver_id
+// Message Routes - FIXED + SECURED
 async function handleGetMessages(request) {
   try {
+    // 🔒 SECURITY: Must be logged in to read messages
+    const authCheck = await requireAuth(request)
+    if (!authCheck.authorized) return authCheck.response
+
     const { searchParams } = new URL(request.url)
     const matchId = searchParams.get('matchId')
 
@@ -947,6 +1137,31 @@ async function handleGetMessages(request) {
       )
     }
 
+    // 🔒 IDOR: Verify caller is one of the two participants in this match
+    // Prevents: User C reading chats between User A and User B
+    const callerProfile = await getCallerProfile(authCheck.clerkUserId)
+    if (!callerProfile) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 403 })
+    }
+    const isParticipant = match.user1id === callerProfile.id || match.user2id === callerProfile.id
+    if (!isParticipant) {
+      await logSecurityEvent(request, {
+        event_type: 'UNAUTHORIZED_MESSAGE_READ',
+        endpoint: '/api/messages',
+        attacker_clerk_id: authCheck.clerkUserId,
+        attacker_profile_id: callerProfile.id,
+        attacker_name: callerProfile.name,
+        attacker_email: callerProfile.email,
+        target_user_id: matchId,
+        details: `User "${callerProfile.name}" tried to read messages in match ${matchId} that they are not part of`,
+        severity: 'critical'
+      })
+      return NextResponse.json(
+        { error: 'Forbidden: You are not a participant in this conversation.' },
+        { status: 403 }
+      )
+    }
+
     const userId1 = match.user1id
     const userId2 = match.user2id
 
@@ -961,8 +1176,6 @@ async function handleGetMessages(request) {
 
     if (error) {
       console.error('❌ Get messages error:', error)
-      console.error('Error code:', error.code)
-      console.error('Error message:', error.message)
       return NextResponse.json(
         { error: 'Failed to fetch messages', details: error.message },
         { status: 500 }
@@ -983,7 +1196,6 @@ async function handleGetMessages(request) {
     return NextResponse.json({ messages: mappedMessages })
   } catch (error) {
     console.error('💥 FATAL Get messages error:', error)
-    console.error('Stack:', error.stack)
     return NextResponse.json(
       { error: 'Internal server error', details: error.message },
       { status: 500 }
@@ -993,6 +1205,10 @@ async function handleGetMessages(request) {
 
 async function handleSendMessage(request) {
   try {
+    // 🔒 SECURITY: Must be logged in to send messages
+    const authCheck = await requireAuth(request)
+    if (!authCheck.authorized) return authCheck.response
+
     const body = await request.json()
     const { matchId, senderId, message } = body
 
@@ -1061,6 +1277,10 @@ async function handleSendMessage(request) {
 // Online Status Routes
 async function handleGetOnlineUsers(request) {
   try {
+    // 🔒 SECURITY: Only logged-in users can see who is online
+    const authCheck = await requireAuth(request)
+    if (!authCheck.authorized) return authCheck.response
+
     const activeUserIds = Array.from(onlineUsers.keys())
     return NextResponse.json({ onlineUsers: activeUserIds })
   } catch (error) {
@@ -1386,6 +1606,10 @@ async function handleGetWarnings(request) {
         { status: 400 }
       )
     }
+
+    // 🔒 IDOR: Users can only read their own warnings
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
 
     // FIXED: Use correct column names
     const { data: warnings, error } = await supabase
@@ -1812,6 +2036,10 @@ async function handleGetSentRequests(request) {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
 
+    // 🔒 IDOR: Only the sender can view their own sent requests
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
+
     console.log('📤 Loading sent friend requests for userId:', userId)
 
     const { data: sentRequests, error } = await supabaseAdmin
@@ -1842,6 +2070,10 @@ async function handleGetPendingRequests(request) {
   try {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
+
+    // 🔒 IDOR: Only the receiver can view requests sent to them
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
 
     console.log('📥 Loading friend requests for userId:', userId)
 
@@ -2113,6 +2345,10 @@ async function handleGetBlockedUsers(request) {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
 
+    // 🔒 IDOR: Only you can see who you've blocked
+    const ownerCheck = await requireOwnership(request, userId)
+    if (!ownerCheck.authorized) return ownerCheck.response
+
     const { data, error } = await supabaseAdmin
       .from('blocked_users')
       .select('blocked_id')
@@ -2185,6 +2421,10 @@ async function handleRemoveFriend(request) {
 // Event Management Routes
 async function handleGetEvents(request) {
   try {
+    // 🔒 SECURITY FIX: Require authentication - events are only for logged-in users
+    const authCheck = await requireAuth(request)
+    if (!authCheck.authorized) return authCheck.response
+
     const { searchParams } = new URL(request.url)
     const filterStatus = searchParams.get('status') || 'upcoming'
 
@@ -2861,6 +3101,67 @@ async function handleGetWhoSelectedMe(request) {
     )
   }
 }
+// ============================================================
+// 🔍 SECURITY LOGS: Admin-only endpoint to see all attack attempts
+// ============================================================
+async function handleGetSecurityLogs(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const limit = parseInt(searchParams.get('limit') || '100')
+    const severity = searchParams.get('severity') // optional filter: high, medium, low
+    const event_type = searchParams.get('type')   // optional filter: IDOR_ATTEMPT, etc.
+
+    let query = supabaseAdmin
+      .from('security_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (severity) query = query.eq('severity', severity)
+    if (event_type) query = query.eq('event_type', event_type)
+
+    const { data: logs, error } = await query
+
+    if (error) throw error
+
+    // Summarize repeat attackers
+    const attackerSummary = {}
+    for (const log of (logs || [])) {
+      if (log.attacker_email) {
+        if (!attackerSummary[log.attacker_email]) {
+          attackerSummary[log.attacker_email] = {
+            name: log.attacker_name,
+            email: log.attacker_email,
+            clerk_id: log.attacker_clerk_id,
+            profile_id: log.attacker_profile_id,
+            attempts: 0,
+            last_attempt: log.created_at,
+            endpoints_targeted: new Set()
+          }
+        }
+        attackerSummary[log.attacker_email].attempts++
+        attackerSummary[log.attacker_email].endpoints_targeted.add(log.endpoint)
+      }
+    }
+
+    // Convert Sets to arrays for JSON serialization
+    const topAttackers = Object.values(attackerSummary)
+      .map(a => ({ ...a, endpoints_targeted: [...a.endpoints_targeted] }))
+      .sort((a, b) => b.attempts - a.attempts)
+
+    return NextResponse.json({
+      logs: logs || [],
+      totalCount: logs?.length || 0,
+      topAttackers
+    })
+  } catch (error) {
+    console.error('❌ Get security logs error:', error)
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    )
+  }
+}
 
 // Main router
 export async function GET(request) {
@@ -2884,6 +3185,8 @@ export async function GET(request) {
     return handleGetOnlineUsers(request)
   } else if (pathname.includes('/api/likes')) {
     return handleGetLikes(request)
+  } else if (pathname.includes('/api/admin/security-logs')) {
+    return handleGetSecurityLogs(request)
   } else if (pathname.includes('/api/admin/users')) {
     return handleAdminGetUsers(request)
   } else if (pathname.includes('/api/admin/conversations')) {

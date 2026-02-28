@@ -18,7 +18,7 @@ export default function App() {
   // Clerk authentication
   const { isSignedIn, user, isLoaded } = useUser()
   const { signOut } = useClerk()
-  
+
   const [currentUser, setCurrentUser] = useState(null)
   const [view, setView] = useState('landing') // landing, profile-setup, main, profile
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false) // Welcome screen for returning users
@@ -27,7 +27,7 @@ export default function App() {
   const [matches, setMatches] = useState([])
   const [selectedMatch, setSelectedMatch] = useState(null)
   const [messages, setMessages] = useState([])
-  
+
   // Use ref to track current match ID - prevents stale closure in callbacks
   const currentMatchIdRef = useRef(null)
   const [messageInput, setMessageInput] = useState('')
@@ -52,7 +52,7 @@ export default function App() {
   const [unreadWarningsCount, setUnreadWarningsCount] = useState(0) // Count of unread warnings
   const [showNotifications, setShowNotifications] = useState(false) // Toggle notification modal
   const [showHelpModal, setShowHelpModal] = useState(false) // Toggle help modal
-  
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
@@ -62,9 +62,9 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useState([])
   const [sentRequests, setSentRequests] = useState(new Set())
   const [friendRequests, setFriendRequests] = useState([])
-  
+
   // Blocked users state
-  
+
   // Events state
   const [events, setEvents] = useState([])
   const [selectedEvent, setSelectedEvent] = useState(null)
@@ -129,7 +129,7 @@ export default function App() {
   // Clerk authentication - check if user is signed in and load their profile
   useEffect(() => {
     if (!isLoaded) return // Wait for Clerk to load
-    
+
     if (isSignedIn && user) {
       // User is authenticated with Clerk
       checkOrCreateProfile()
@@ -139,17 +139,17 @@ export default function App() {
       setCurrentUser(null)
     }
   }, [isSignedIn, user, isLoaded])
-  
+
   // Check if user profile exists in Supabase, if not create it
   const checkOrCreateProfile = async () => {
     try {
       const clerkUserId = user.id
       const emailAddress = user.emailAddresses[0]?.emailAddress || ''
       const firstName = user.firstName || ''
-      
+
       // Check if profile exists using Clerk user ID
       const response = await fetch(`/api/profile-by-clerk?clerkUserId=${clerkUserId}`)
-      
+
       if (response.ok) {
         const data = await response.json()
         if (data.profile) {
@@ -183,15 +183,19 @@ export default function App() {
       setView('profile-setup')
     }
   }
-  
+
   useEffect(() => {
-    // Auto-refresh events every 10 seconds
+    // 🔒 SECURITY FIX: Only auto-refresh events when user is logged in
+    // Previously this ran even before auth, making events public to anyone
+    if (!currentUser) return
+
+    // Reduced frequency from 10s → 60s to avoid hammering the API
     const interval = setInterval(() => {
       loadEvents()
-    }, 10000)
-    
+    }, 60000)
+
     return () => clearInterval(interval)
-  }, [])
+  }, [currentUser]) // now depends on currentUser - won't run until login
 
   useEffect(() => {
     if (selectedMatch) {
@@ -201,19 +205,19 @@ export default function App() {
         console.log('🗑️ Removing old channel:', channel.topic)
         supabase.removeChannel(channel)
       })
-      
+
       // Update the ref with current match ID
       currentMatchIdRef.current = selectedMatch.id
       console.log('✅ Current match ID set to:', selectedMatch.id)
-      
+
       // Only scroll to bottom on INITIAL load, then never again
       loadMessages(selectedMatch.id, true) // Force scroll ONLY on initial load
-      
+
       // Subscribe to real-time message updates using Supabase Realtime
       console.log('🔌 Subscribing to Realtime for match:', selectedMatch.id)
-      
+
       const matchId = selectedMatch.id // Capture in closure
-      
+
       const channel = supabase
         .channel(`match-${matchId}`)
         .on('postgres_changes', {
@@ -223,30 +227,30 @@ export default function App() {
         }, (payload) => {
           console.log('⚡ REALTIME MESSAGE RECEIVED:', payload.new)
           console.log('📌 Current match ID ref:', currentMatchIdRef.current)
-          
+
           // New message arrives - check if it's for this match
           const newMessage = payload.new
-          
+
           // Since messages table doesn't have match_id, we need to check if this message
           // is between the users in our current match
           if (!selectedMatch) {
             console.log('⚠️ No match selected, ignoring message')
             return
           }
-          
+
           const currentUserId = currentUser.id
           const otherUserId = selectedMatch.matchedUser?.id
-          
+
           // Check if message is between current user and matched user
-          const isForThisMatch = 
+          const isForThisMatch =
             (newMessage.sender_id === currentUserId && newMessage.receiver_id === otherUserId) ||
             (newMessage.sender_id === otherUserId && newMessage.receiver_id === currentUserId)
-          
+
           if (!isForThisMatch) {
             console.log('⚠️ Message not for this match, ignoring')
             return
           }
-          
+
           console.log('✅ Message validated, adding to chat')
           setMessages(prev => {
             // Avoid duplicates
@@ -256,7 +260,7 @@ export default function App() {
             }
             return [...prev, newMessage]
           })
-          
+
           // Update match's last message time for sorting
           setMatches(prevMatches => {
             return prevMatches.map(match => {
@@ -266,12 +270,12 @@ export default function App() {
               return match
             })
           })
-          
+
           // NO AUTO-SCROLL - let user control their scroll position
         })
         .subscribe((status) => {
           console.log('📡 Realtime subscription status:', status)
-          
+
           if (status === 'SUBSCRIPTION_ERROR') {
             console.error('❌ Realtime subscription failed! Check Supabase Dashboard → Database → Replication')
             toast.error('Realtime not enabled. Messages will have 2-3 sec delay.')
@@ -279,7 +283,7 @@ export default function App() {
             console.log('✅ Realtime connected! Messages will be instant.')
           }
         })
-      
+
       // Fallback polling if Realtime doesn't work (safety net)
       const pollInterval = setInterval(() => {
         // Use the captured matchId, not selectedMatch (which might be stale)
@@ -290,12 +294,12 @@ export default function App() {
           console.log('⚠️ Skipping fallback poll - match changed')
         }
       }, 10000) // Poll every 10 seconds as backup (reduced from 3s)
-      
+
       return () => {
         console.log('🔌 Unsubscribing from Realtime for match:', matchId)
         supabase.removeChannel(channel)
         clearInterval(pollInterval)
-        
+
         // Clear ref if this was the current match
         if (currentMatchIdRef.current === matchId) {
           currentMatchIdRef.current = null
@@ -340,13 +344,13 @@ export default function App() {
     // Check for unread messages from all friends
     const checkUnreadMessages = async () => {
       if (!currentUser || !matches.length) return
-      
+
       const newUnreadSet = new Set()
-      
+
       for (const match of matches) {
         // Skip the currently selected match (it's already marked as read)
         if (selectedMatch?.id === match.id) continue
-        
+
         try {
           const response = await fetch(`/api/messages?matchId=${match.id}`)
           const data = await response.json()
@@ -354,7 +358,7 @@ export default function App() {
             // Get the last read timestamp for this match
             const lastReadStr = localStorage.getItem(`lastRead_${match.id}`)
             const lastReadTime = lastReadStr ? new Date(lastReadStr).getTime() : 0
-            
+
             // Check if there are any messages from the friend (not from current user) after last read
             const hasNewMessages = data.messages.some(msg => {
               const isFromFriend = msg.senderId === match.matchedUser?.id
@@ -362,7 +366,7 @@ export default function App() {
               const isUnread = messageTime > lastReadTime
               return isFromFriend && isUnread
             })
-            
+
             if (hasNewMessages) {
               newUnreadSet.add(match.id)
               console.log('📬 Unread messages from:', match.matchedUser?.name)
@@ -372,14 +376,14 @@ export default function App() {
           console.error('Failed to check messages:', error)
         }
       }
-      
+
       // Update unread messages state
       setUnreadMessages(newUnreadSet)
       if (newUnreadSet.size > 0) {
         console.log(`🔴 Total unread conversations: ${newUnreadSet.size}`)
       }
     }
-    
+
     if (matches.length > 0) {
       checkUnreadMessages()
       // Check every 10 seconds for unread count (Realtime handles instant message delivery)
@@ -392,16 +396,16 @@ export default function App() {
   useEffect(() => {
     const checkWarnings = async () => {
       if (!currentUser) return
-      
+
       try {
         const response = await fetch(`/api/warnings?userId=${currentUser.id}`)
         const data = await response.json()
-        
+
         if (response.ok && data.warnings && data.warnings.length > 0) {
           // Store warnings in state
           setWarnings(data.warnings)
           setUnreadWarningsCount(data.warnings.length)
-          
+
           // Show toast notification for new warnings
           toast.error(`You have ${data.warnings.length} new warning(s) from admin`, {
             duration: 8000,
@@ -415,7 +419,7 @@ export default function App() {
         console.error('Failed to check warnings:', error)
       }
     }
-    
+
     if (currentUser && view === 'main') {
       checkWarnings()
       // Check for new warnings every 30 seconds
@@ -431,7 +435,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ warningId })
       })
-      
+
       // Remove from warnings list and update count
       setWarnings(prev => prev.filter(w => w.id !== warningId))
       setUnreadWarningsCount(prev => Math.max(0, prev - 1))
@@ -445,10 +449,10 @@ export default function App() {
     if (currentUser && view === 'main') {
       // Initial load of friend requests
       loadFriendRequests(currentUser.id)
-      
+
       // Subscribe to new friend requests in real-time
       console.log('🔔 Subscribing to real-time friend requests for user:', currentUser.id)
-      
+
       const channel = supabase
         .channel('friend-requests-channel')
         .on('postgres_changes', {
@@ -458,24 +462,24 @@ export default function App() {
           filter: `receiver_id=eq.${currentUser.id}`
         }, async (payload) => {
           console.log('📬 Friend request real-time event:', payload)
-          
+
           if (payload.eventType === 'INSERT') {
             console.log('⚡ NEW FRIEND REQUEST RECEIVED:', payload.new)
-            
+
             // Only show if status is pending
             if (payload.new.status !== 'pending') {
               console.log('⚠️ Skipping non-pending request')
               return
             }
-            
+
             // Fetch the sender's profile data
             try {
               const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
               const data = await response.json()
-              
+
               if (response.ok && data.profiles) {
                 const senderProfile = data.profiles.find(p => p.id === payload.new.sender_id)
-                
+
                 if (senderProfile) {
                   const newRequest = {
                     id: payload.new.id,
@@ -485,7 +489,7 @@ export default function App() {
                     requestedAt: payload.new.created_at,
                     ...senderProfile
                   }
-                  
+
                   // Add to friend requests list instantly
                   setFriendRequests(prev => {
                     // Avoid duplicates
@@ -494,7 +498,7 @@ export default function App() {
                     }
                     return [newRequest, ...prev]
                   })
-                  
+
                   // Show notification toast
                   toast.success(`${senderProfile.name} sent you a friend request! 🎉`, {
                     duration: 5000,
@@ -503,7 +507,7 @@ export default function App() {
                       onClick: () => setShowNotifications(true)
                     }
                   })
-                  
+
                   console.log('✅ Friend request added to notifications:', newRequest)
                 }
               }
@@ -514,7 +518,7 @@ export default function App() {
             }
           } else if (payload.eventType === 'UPDATE') {
             console.log('⚡ FRIEND REQUEST UPDATED:', payload.new)
-            
+
             // If status changed to accepted or rejected, remove from notifications
             if (payload.new.status === 'accepted' || payload.new.status === 'rejected') {
               setFriendRequests(prev => prev.filter(req => req.id !== payload.new.id))
@@ -533,7 +537,7 @@ export default function App() {
             console.error('❌ Failed to subscribe to friend requests')
           }
         })
-      
+
       return () => {
         console.log('🔌 Unsubscribing from friend requests')
         supabase.removeChannel(channel)
@@ -588,11 +592,11 @@ export default function App() {
       }
 
       let profileId = currentUser?.id
-      
+
       // For new Clerk users, create profile first
       if (!currentUser && user) {
         console.log('🔨 Creating new profile for Clerk user')
-        
+
         const createResponse = await fetch('/api/create-profile-clerk', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -634,13 +638,13 @@ export default function App() {
       }
 
       // Parse interests and hobbies
-      const interestsArray = profileForm.interests 
+      const interestsArray = profileForm.interests
         ? profileForm.interests.split(',').map(i => i.trim()).filter(i => i)
         : []
-      const hobbiesArray = profileForm.hobbies 
+      const hobbiesArray = profileForm.hobbies
         ? profileForm.hobbies.split(',').map(i => i.trim()).filter(i => i)
         : []
-      
+
       toast.loading('Updating profile...', { id: 'setup-profile' })
       const response = await fetch('/api/profiles', {
         method: 'POST',
@@ -657,6 +661,8 @@ export default function App() {
           linkedin: profileForm.linkedin || '',
           interests: interestsArray,
           hobbies: hobbiesArray,
+          department: profileForm.department || '',
+          year: parseInt(profileForm.year) || 1,
           profile_picture: profilePictureUrl
         })
       })
@@ -687,7 +693,7 @@ export default function App() {
       if (response.ok) {
         // Filter out blocked users
         const filtered = (data.profiles || []).filter(p => !blockedUsers.has(p.id))
-        
+
         // Prioritize specific profile at the top
         const priorityEmail = '23eg105j13@anurag.edu.in'
         const sorted = filtered.sort((a, b) => {
@@ -695,9 +701,9 @@ export default function App() {
           if (b.email === priorityEmail) return 1
           return 0
         })
-        
+
         setProfiles(sorted)
-        
+
         // Load user's liked profiles to show request status
         const likesResponse = await fetch(`/api/likes?userId=${userId}`)
         const likesData = await likesResponse.json()
@@ -705,7 +711,7 @@ export default function App() {
           const liked = new Set(likesData.likes?.map(l => l.toUserId) || [])
           setLikedProfiles(liked)
         }
-        
+
         // Also load sent friend requests to mark those profiles as "Request Sent"
         const sentRequestsResponse = await fetch(`/api/friend-request/sent?userId=${userId}`)
         const sentRequestsData = await sentRequestsResponse.json()
@@ -764,43 +770,43 @@ export default function App() {
       const data = await response.json()
       if (response.ok) {
         const newMessages = data.messages || []
-        
+
         // CRITICAL: Only update messages if this is still the selected match
         // This prevents race conditions when switching chats quickly
         if (selectedMatch && selectedMatch.id !== matchId) {
           console.log('⚠️ Ignoring loadMessages for old match:', matchId)
           return
         }
-        
+
         // Check if there are actually new messages
         const hasNewMessages = newMessages.length !== messages.length
-        
+
         setMessages(newMessages)
-        
+
         // Mark this friend as read (remove from unread set)
         setUnreadMessages(prev => {
           const newSet = new Set(prev)
           newSet.delete(matchId)
           return newSet
         })
-        
+
         // Save timestamp of when we last read messages from this friend
         localStorage.setItem(`lastRead_${matchId}`, new Date().toISOString())
-        
+
         // Re-sort matches to move this conversation to the top
         sortMatchesByLastMessage()
-        
+
         // ONLY auto-scroll if explicitly requested (forceScroll = true on initial load)
         // NEVER auto-scroll during polling or updates
         if (forceScroll) {
           setTimeout(() => {
             const chatContainer = document.getElementById('chat-messages')
             const mobileChatContainer = document.getElementById('mobile-chat-messages')
-            
+
             if (chatContainer) {
               chatContainer.scrollTop = chatContainer.scrollHeight
             }
-            
+
             if (mobileChatContainer) {
               mobileChatContainer.scrollTop = mobileChatContainer.scrollHeight
             }
@@ -908,10 +914,10 @@ export default function App() {
       const data = await response.json()
       if (response.ok) {
         const blockedIds = data.map(b => b.blocked_id)
-        
+
         // Always update both states - clear if empty
         setBlockedUsers(new Set(blockedIds))
-        
+
         // Fetch full profile data for blocked users
         if (blockedIds.length > 0) {
           const profilesResponse = await fetch(`/api/profiles?userId=${userId}`)
@@ -941,7 +947,7 @@ export default function App() {
       setLoadingLeaderboard(true)
       const response = await fetch(`/api/leaderboard?type=${type}&limit=20`)
       const data = await response.json()
-      
+
       if (response.ok) {
         // Track previous ranks before updating
         const currentRanks = {}
@@ -949,7 +955,7 @@ export default function App() {
           currentRanks[profile.id] = idx + 1
         })
         setPreviousRanks(currentRanks)
-        
+
         setLeaderboardData(data.leaderboard || [])
         setLeaderboardType(type)
         console.log(`✅ Loaded ${type} leaderboard:`, data.leaderboard.length)
@@ -967,12 +973,12 @@ export default function App() {
     // Set target time once when component mounts or leaderboard type changes
     if (!targetTimeRef.current) {
       const now = new Date()
-      
+
       if (leaderboardType === 'daily') {
         // PRODUCTION: Reset at 12 PM daily
         const target = new Date(now)
         target.setHours(12, 0, 0, 0) // Set to 12 PM
-        
+
         // If it's already past 12 PM today, set to 12 PM tomorrow
         if (now >= target) {
           target.setDate(target.getDate() + 1)
@@ -987,24 +993,24 @@ export default function App() {
         targetTimeRef.current = target
       }
     }
-    
+
     const updateCountdown = () => {
       const now = new Date()
       const targetTime = targetTimeRef.current
-      
+
       if (targetTime) {
         const diff = targetTime - now
         const hours = Math.floor(diff / (1000 * 60 * 60))
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
         const seconds = Math.floor((diff % (1000 * 60)) / 1000)
-        
+
         // Check if timer just hit 0 (exactly when it reaches 0 or negative)
         if (diff <= 0 && !bonusShownRef.current) {
           // Check if we haven't already given bonus in last 15 minutes
           const lastBonusKey = `lastBonus_${leaderboardType}`
           const lastBonus = localStorage.getItem(lastBonusKey)
           const shouldShowBonus = !lastBonus || (now - new Date(lastBonus)) > 15 * 60 * 1000
-          
+
           if (shouldShowBonus) {
             // Show modal with 10 minute expiry for claiming
             const expiry = new Date(now.getTime() + 10 * 60 * 1000)
@@ -1018,15 +1024,15 @@ export default function App() {
             localStorage.setItem('bonusRewardType', leaderboardType)
           }
         }
-        
-        setCountdown({ 
-          hours: Math.max(0, hours), 
-          minutes: Math.max(0, minutes), 
-          seconds: Math.max(0, seconds) 
+
+        setCountdown({
+          hours: Math.max(0, hours),
+          minutes: Math.max(0, minutes),
+          seconds: Math.max(0, seconds)
         })
       }
     }
-    
+
     updateCountdown()
     const interval = setInterval(updateCountdown, 1000)
     return () => {
@@ -1035,18 +1041,18 @@ export default function App() {
       targetTimeRef.current = null // Reset target time
     }
   }, [leaderboardType])
-  
+
   // Check and restore bonus expiry from localStorage on mount
   useEffect(() => {
     const now = new Date()
     const storedExpiry = localStorage.getItem('bonusExpiry')
     const storedRewardType = localStorage.getItem('bonusRewardType')
     const storedClaimed = localStorage.getItem('bonusClaimed')
-    
+
     // First check if there's a stored bonus in progress
     if (storedExpiry && storedRewardType) {
       const expiry = new Date(storedExpiry)
-      
+
       if (expiry > now && storedClaimed !== 'true') {
         // Bonus claim window still valid and not yet claimed
         setBonusExpiry(expiry)
@@ -1063,11 +1069,11 @@ export default function App() {
       // No stored bonus - check if we're within 10 minutes after 12 PM reset time
       const resetTime = new Date(now)
       resetTime.setHours(12, 0, 0, 0)
-      
+
       // Check if current time is between 12:00 PM and 12:10 PM
       const timeSinceReset = now - resetTime
       const isWithinClaimWindow = timeSinceReset >= 0 && timeSinceReset <= 10 * 60 * 1000
-      
+
       if (isWithinClaimWindow && storedClaimed !== 'true') {
         // We're within the 10-minute claim window after 12 PM - show bonus!
         const expiry = new Date(resetTime.getTime() + 10 * 60 * 1000)
@@ -1080,11 +1086,11 @@ export default function App() {
       }
     }
   }, [])
-  
+
   // Bonus expiry countdown - close modal when expired
   useEffect(() => {
     if (!bonusExpiry || bonusClaimed) return
-    
+
     const checkExpiry = () => {
       const now = new Date()
       if (now >= bonusExpiry) {
@@ -1095,11 +1101,11 @@ export default function App() {
         localStorage.removeItem('bonusClaimed')
       }
     }
-    
+
     const interval = setInterval(checkExpiry, 1000)
     return () => clearInterval(interval)
   }, [bonusExpiry, bonusClaimed])
-  
+
   // Function to claim bonus reward
   const claimBonusReward = async () => {
     try {
@@ -1111,17 +1117,17 @@ export default function App() {
           rewardType: bonusRewardType
         })
       })
-      
+
       const data = await response.json()
-      
+
       if (response.ok) {
         setBonusClaimed(true)
         localStorage.setItem('bonusClaimed', 'true')
         toast.success('🎉 3 bonus likes added to your profile!', { duration: 3000 })
-        
+
         // Reload leaderboard to show updated likes
         loadLeaderboard(leaderboardType)
-        
+
         // Close modal after 2 seconds
         setTimeout(() => {
           setShowBonusModal(false)
@@ -1138,37 +1144,37 @@ export default function App() {
     // Scarcity badges - only limited spots get special badges
     if (leaderboardType === 'daily') {
       if (rank === 1) {
-        const title = profile.gender === 'male' ? 'King of the Day' : 
-                      profile.gender === 'female' ? 'Queen of the Day' : 
-                      'King/Queen of the Day'
+        const title = profile.gender === 'male' ? 'King of the Day' :
+          profile.gender === 'female' ? 'Queen of the Day' :
+            'King/Queen of the Day'
         return { emoji: '👑', text: title, color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
       }
       if (rank === 2) return { emoji: '🔥', text: 'Hottest Today', color: 'text-orange-500 bg-orange-100 border-orange-400' }
       if (rank === 3) return { emoji: '🔥', text: 'Hot Today', color: 'text-red-500 bg-red-100 border-red-400' }
       if (rank <= 10) return { emoji: '⭐', text: 'Rising Star', color: 'text-purple-500 bg-purple-100 border-purple-400' }
     }
-    
+
     if (leaderboardType === 'weekly') {
       if (rank === 1) return { emoji: '👑', text: 'Week Champion', color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
       if (rank <= 3) return { emoji: '🔥', text: 'Top 3 This Week', color: 'text-orange-500 bg-orange-100 border-orange-400' }
       if (rank <= 10) return { emoji: '⭐', text: 'Rising Star', color: 'text-purple-500 bg-purple-100 border-purple-400' }
     }
-    
+
     if (leaderboardType === 'alltime') {
       if (rank === 1) return { emoji: '👑', text: 'Most Popular Ever', color: 'text-yellow-500 bg-yellow-100 border-yellow-400' }
       if (rank === 2) return { emoji: '🥈', text: 'Silver Legend', color: 'text-gray-500 bg-gray-100 border-gray-400' }
       if (rank === 3) return { emoji: '🥉', text: 'Bronze Legend', color: 'text-orange-500 bg-orange-100 border-orange-400' }
       if (rank <= 10) return { emoji: '⭐', text: 'Hall of Fame', color: 'text-purple-500 bg-purple-100 border-purple-400' }
     }
-    
+
     return null
   }
-  
+
   // Get position change indicator
   const getPositionChange = (profileId, currentRank) => {
     const prevRank = previousRanks[profileId]
     if (!prevRank || prevRank === currentRank) return null
-    
+
     if (prevRank > currentRank) {
       // Rank improved (lower number is better)
       const change = prevRank - currentRank
@@ -1185,19 +1191,19 @@ export default function App() {
 
   const rollDice = async () => {
     if (!currentUser) return
-    
+
     setIsRolling(true)
     setShowDiceAnimation(true)
-    
+
     try {
       const response = await fetch('/api/dice/roll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: currentUser.id })
       })
-      
+
       const data = await response.json()
-      
+
       if (data.alreadyRolled) {
         toast.error(data.message)
         setDiceRolled(true)
@@ -1224,18 +1230,18 @@ export default function App() {
 
   const loadDiceMatches = async () => {
     if (!currentUser) return
-    
+
     try {
       const response = await fetch(`/api/dice/matches?userId=${currentUser.id}`)
       const data = await response.json()
-      
+
       if (data.hasRolled) {
         setDiceRolled(true)
         setMyDiceNumber(data.myDiceNumber)
         setDiceMatches(data.matches || [])
         setHasSelectedMatch(data.hasSelectedMatch)
       }
-      
+
       // Check for selection notifications
       loadDiceSelectionNotifications()
     } catch (error) {
@@ -1245,11 +1251,11 @@ export default function App() {
 
   const loadDiceSelectionNotifications = async () => {
     if (!currentUser) return
-    
+
     try {
       const response = await fetch(`/api/dice/who-selected-me?userId=${currentUser.id}`)
       const data = await response.json()
-      
+
       if (data.selections && data.selections.length > 0) {
         setDiceSelectionNotifications(data.selections)
       }
@@ -1277,7 +1283,7 @@ export default function App() {
 
   const confirmDiceMatch = async () => {
     if (!selectedDiceProfile || !currentUser) return
-    
+
     try {
       const response = await fetch('/api/dice/select', {
         method: 'POST',
@@ -1287,9 +1293,9 @@ export default function App() {
           selectedUserId: selectedDiceProfile.id
         })
       })
-      
+
       const data = await response.json()
-      
+
       if (data.success) {
         toast.success('🎉 Instant Match! You have 24 hours to chat!')
         setHasSelectedMatch(true)
@@ -1307,7 +1313,7 @@ export default function App() {
 
   const loadActiveDiceMatches = async () => {
     if (!currentUser) return
-    
+
     try {
       const response = await fetch(`/api/dice/active-matches?userId=${currentUser.id}`)
       const data = await response.json()
@@ -1319,7 +1325,7 @@ export default function App() {
 
   const markDiceMatchChatted = async (matchedUserId) => {
     if (!currentUser) return
-    
+
     try {
       await fetch('/api/dice/mark-chatted', {
         method: 'POST',
@@ -1357,35 +1363,35 @@ export default function App() {
       return () => clearInterval(interval)
     }
   }, [mainNav, diceRolled])
-  
+
   // Get achievement progress for current user
   const getAchievementProgress = (currentUserRank, topProfile) => {
     if (!currentUserRank || !topProfile) return null
-    
+
     const currentUserProfile = leaderboardData.find(p => p.id === currentUser?.id)
     if (!currentUserProfile) return null
-    
+
     const currentLikes = leaderboardType === 'daily' ? currentUserProfile.daily_likes :
-                        leaderboardType === 'weekly' ? currentUserProfile.weekly_likes :
-                        currentUserProfile.total_likes
+      leaderboardType === 'weekly' ? currentUserProfile.weekly_likes :
+        currentUserProfile.total_likes
     const topLikes = leaderboardType === 'daily' ? topProfile.daily_likes :
-                    leaderboardType === 'weekly' ? topProfile.weekly_likes :
-                    topProfile.total_likes
-    
+      leaderboardType === 'weekly' ? topProfile.weekly_likes :
+        topProfile.total_likes
+
     if (currentUserRank > 10) {
       const tenthProfile = leaderboardData[9]
       const tenthLikes = leaderboardType === 'daily' ? tenthProfile.daily_likes :
-                        leaderboardType === 'weekly' ? tenthProfile.weekly_likes :
-                        tenthProfile.total_likes
+        leaderboardType === 'weekly' ? tenthProfile.weekly_likes :
+          tenthProfile.total_likes
       const needed = tenthLikes - currentLikes + 1
       return { text: `🎯 ${needed} more likes to reach Top 10!`, progress: (currentLikes / tenthLikes) * 100 }
     }
-    
+
     if (currentUserRank > 1) {
       const needed = topLikes - currentLikes + 1
       return { text: `🔥 Get ${needed} more to dethrone #1!`, progress: (currentLikes / topLikes) * 100 }
     }
-    
+
     return null
   }
 
@@ -1470,10 +1476,10 @@ export default function App() {
       if (response.ok) {
         // Reload matches to show new chat
         await loadMatches(currentUser.id)
-        
+
         // Reload profiles to update "Unlike" button in Discover tab
         await loadProfiles(currentUser.id)
-        
+
         return true
       } else {
         console.error('❌ Accept error:', data.error)
@@ -1581,20 +1587,20 @@ export default function App() {
 
       if (response.ok) {
         toast.success('Friend removed - All chat history deleted to save storage 🗑️')
-        
+
         // Remove from liked profiles so they can send request again
         setLikedProfiles(prev => {
           const newSet = new Set(prev)
           newSet.delete(friendId)
           return newSet
         })
-        
+
         // Reload matches to remove from Friends tab
         loadMatches(currentUser.id)
-        
+
         // Reload profiles to show "Send Request" button in Discover tab
         loadProfiles(currentUser.id)
-        
+
         setSelectedMatch(null)
       } else {
         toast.error(data.error || 'Failed to remove friend')
@@ -1608,17 +1614,17 @@ export default function App() {
     if (!isTyping) {
       setIsTyping(true)
     }
-    
+
     // Clear existing timeout
     if (typingTimeout) {
       clearTimeout(typingTimeout)
     }
-    
+
     // Set new timeout to stop typing indicator
     const timeout = setTimeout(() => {
       setIsTyping(false)
     }, 2000)
-    
+
     setTypingTimeout(timeout)
   }
 
@@ -1656,18 +1662,18 @@ export default function App() {
           })
           const likeData = await likeResponse.json()
           console.log('✅ Like increment response:', likeData)
-          
+
           // Show warning if columns don't exist
           if (likeData.columnsExist === false) {
             console.error('⚠️ LEADERBOARD NOT SET UP!')
             console.error('Run this SQL in Supabase: add-leaderboard-columns.sql')
             toast.error('⚠️ Leaderboard not set up yet! Check console.')
           }
-          
+
           if (likeData.success) {
             console.log('✅ Like count incremented successfully!')
           }
-          
+
           // Always refresh leaderboard data if it was loaded before
           if (leaderboardData.length > 0) {
             console.log('🔄 Refreshing leaderboard after like...')
@@ -1702,16 +1708,16 @@ export default function App() {
         body: JSON.stringify({ profileId })
       })
       const data = await response.json()
-      
+
       if (response.ok) {
         console.log('✅ Like count decremented:', data)
         toast.success('💔 Unliked!')
-        
+
         // Remove from liked profiles set
         const newLikedProfiles = new Set(likedProfiles)
         newLikedProfiles.delete(profileId)
         setLikedProfiles(newLikedProfiles)
-        
+
         // Refresh leaderboard if viewing it
         if (leaderboardData.length > 0) {
           console.log('🔄 Refreshing leaderboard after unlike...')
@@ -1767,7 +1773,7 @@ export default function App() {
 
   const handleTouchEnd = () => {
     if (!touchStart || !touchEnd) return
-    
+
     const distance = touchStart - touchEnd
     const isLeftSwipe = distance > 50
     const isRightSwipe = distance < -50
@@ -1800,7 +1806,7 @@ export default function App() {
 
       if (response.ok) {
         const data = await response.json()
-        
+
         // Instantly add message to UI (optimistic update)
         setMessages(prev => [...prev, {
           id: data.message.id,
@@ -1810,7 +1816,7 @@ export default function App() {
           createdAt: new Date().toISOString(),
           read: false
         }])
-        
+
         // Update the lastMessageTime for this match to move it to the top
         setMatches(prevMatches => {
           return prevMatches.map(match => {
@@ -1820,9 +1826,9 @@ export default function App() {
             return match
           })
         })
-        
+
         // 🎲 Check if this is a dice match and mark as chatted
-        const diceMatch = activeDiceMatches.find(dm => 
+        const diceMatch = activeDiceMatches.find(dm =>
           (dm.user1_id === currentUser.id && dm.user2_id === selectedMatch.matchedUser?.id) ||
           (dm.user2_id === currentUser.id && dm.user1_id === selectedMatch.matchedUser?.id)
         )
@@ -1831,7 +1837,7 @@ export default function App() {
           await markDiceMatchChatted(selectedMatch.matchedUser.id)
           toast.success('✅ You saved this friendship by chatting in time!', { duration: 4000 })
         }
-        
+
         // Force scroll to bottom when user sends a message
         setShouldAutoScroll(true)
       } else {
@@ -1849,10 +1855,10 @@ export default function App() {
       // Clear local state first
       setCurrentUser(null)
       setView('landing')
-      
+
       // Sign out from Clerk
       await signOut()
-      
+
       toast.success('Logged out successfully')
     } catch (error) {
       console.error('Logout error:', error)
@@ -1865,35 +1871,35 @@ export default function App() {
     e.preventDefault()
     console.log('=== PROFILE UPDATE STARTED ===')
     console.log('Form submitted, current state:', { loading, uploadingPhoto })
-    
+
     if (loading || uploadingPhoto) {
       console.log('Already processing, skipping...')
       toast.warning('Please wait, already processing...')
       return
     }
-    
+
     setLoading(true)
 
     try {
       console.log('Profile form data:', profileForm)
       console.log('Current user:', currentUser)
-      
+
       // Upload photo if it's a base64 preview
       let finalPhotoUrl = profileForm.photo_url
       if (profileForm.photo_url && !profileForm.photo_url.startsWith('http')) {
         console.log('📸 Photo is base64, uploading to server...')
         toast.loading('Uploading photo...', { id: 'photo-upload' })
-        
+
         finalPhotoUrl = await uploadPhotoToServer(profileForm.photo_url)
         console.log('Photo upload result:', finalPhotoUrl)
-        
+
         if (!finalPhotoUrl) {
           setLoading(false)
           toast.error('Failed to upload photo. Please try again.', { id: 'photo-upload' })
           console.error('❌ Photo upload failed, stopping profile update')
           return
         }
-        
+
         toast.success('Photo uploaded successfully!', { id: 'photo-upload' })
         console.log('✅ Photo uploaded:', finalPhotoUrl)
       } else {
@@ -1901,26 +1907,26 @@ export default function App() {
       }
 
       const interestsArray = profileForm.interests.split(',').map(i => i.trim()).filter(i => i)
-      
+
       const payload = {
         userId: currentUser.id,
         name: profileForm.name,
         bio: profileForm.bio,
-        age: profileForm.age,
+        age: parseInt(profileForm.age) || 18,
         gender: profileForm.gender,
         location: profileForm.location,
         instagram: profileForm.instagram,
         github: profileForm.github,
         linkedin: profileForm.linkedin,
         department: profileForm.department,
-        year: profileForm.year,
+        year: parseInt(profileForm.year) || 1,
         photo_url: finalPhotoUrl,
         interests: interestsArray
       }
-      
+
       console.log('💾 Sending profile update to API:', payload)
       toast.loading('Saving profile...', { id: 'profile-save' })
-      
+
       const response = await fetch('/api/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1937,7 +1943,7 @@ export default function App() {
         console.log('✅ Updated user object:', updatedUser)
         setCurrentUser(updatedUser)
         localStorage.setItem('currentUser', JSON.stringify(updatedUser))
-        
+
         // Update the profile form with new data
         setProfileForm({
           name: updatedUser.name || '',
@@ -1953,9 +1959,9 @@ export default function App() {
           interests: updatedUser.interests ? updatedUser.interests.join(', ') : '',
           photo_url: updatedUser.photo_url || ''
         })
-        
+
         setIsEditingProfile(false)
-        
+
         // Reload profiles to show updated data
         console.log('🔄 Reloading profiles...')
         await loadProfiles(currentUser.id)
@@ -2002,30 +2008,30 @@ export default function App() {
     try {
       console.log('🔍 Searching for:', searchQuery)
       console.log('👤 Current user ID:', currentUser.id)
-      
+
       // Search in profiles by name, email, or department
       const response = await fetch(`/api/profiles?userId=${currentUser.id}`)
       const data = await response.json()
-      
+
       console.log('📊 Total profiles received from database:', data.profiles?.length)
       console.log('📋 Sample profiles:', data.profiles?.slice(0, 3))
-      
+
       if (response.ok && data.profiles) {
         const query = searchQuery.toLowerCase().trim()
         console.log('🔎 Search query (lowercase):', query)
-        
+
         const filtered = data.profiles.filter(profile => {
           // Skip blocked users
           if (blockedUsers.has(profile.id)) return false
-          
+
           // Search in multiple fields
           const nameMatch = profile.name?.toLowerCase().includes(query)
           const emailMatch = profile.email?.toLowerCase().includes(query)
           const deptMatch = profile.department?.toLowerCase().includes(query)
           const bioMatch = profile.bio?.toLowerCase().includes(query)
-          
+
           const matches = nameMatch || emailMatch || deptMatch || bioMatch
-          
+
           if (matches) {
             console.log('✅ Match found:', {
               email: profile.email,
@@ -2034,13 +2040,13 @@ export default function App() {
               matched_by: nameMatch ? 'name' : emailMatch ? 'email' : deptMatch ? 'department' : 'bio'
             })
           }
-          
+
           return matches
         })
-        
+
         console.log('✅ Search complete. Results:', filtered.length, 'profiles found')
         setSearchResults(filtered)
-        
+
         if (filtered.length === 0) {
           toast.info('No users found matching "' + searchQuery + '"')
         } else {
@@ -2064,7 +2070,7 @@ export default function App() {
       const debounceTimer = setTimeout(() => {
         handleSearch()
       }, 500) // Wait 500ms after user stops typing
-      
+
       return () => clearTimeout(debounceTimer)
     } else {
       setSearchResults([])
@@ -2108,14 +2114,14 @@ export default function App() {
       const response = await fetch(photoUrl)
       const blob = await response.blob()
       console.log('✅ Blob created:', blob.size, 'bytes', blob.type)
-      
+
       // Generate unique filename
       const timestamp = Date.now()
       const randomStr = Math.random().toString(36).substring(7)
       const fileExtension = blob.type.split('/')[1] || 'jpg'
       const fileName = `profile_${currentUser?.id || user?.id || 'user'}_${timestamp}_${randomStr}.${fileExtension}`
       console.log('📝 Generated filename:', fileName)
-      
+
       // Upload to Supabase Storage
       console.log('☁️ Uploading to Supabase Storage...')
       const { data: uploadData, error: uploadError } = await supabase.storage
@@ -2144,11 +2150,11 @@ export default function App() {
       setUploadingPhoto(false)
       toast.success('Photo uploaded successfully!')
       return publicUrl
-      
+
     } catch (error) {
       console.error('❌ Photo upload error:', error)
       setUploadingPhoto(false)
-      
+
       // Provide more specific error messages
       if (error.message.includes('storage')) {
         toast.error('Storage error: Please ensure the profile-photos bucket exists in Supabase')
@@ -2157,7 +2163,7 @@ export default function App() {
       } else {
         toast.error('Failed to upload photo: ' + error.message)
       }
-      
+
       return null
     }
   }
@@ -2206,27 +2212,27 @@ export default function App() {
               </h1>
               <p className="text-2xl text-gray-600 mb-2">Connect with Your Campus Community</p>
               <p className="text-lg text-gray-500 mb-8">Professional networking platform for Anurag University students</p>
-              
+
               {/* Get Started Button - Redirect to Clerk Sign Up */}
               <a href="/sign-up">
-                <Button 
-                  size="lg" 
+                <Button
+                  size="lg"
                   className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-12 py-6 text-xl rounded-full shadow-lg hover:shadow-xl transition-all"
                 >
                   Get Started →
                 </Button>
               </a>
-              
+
               {/* Instagram Help Button */}
               <div className="mt-6">
                 <a href="https://www.instagram.com/anurag_dattes" target="_blank" rel="noopener noreferrer">
-                  <Button 
-                    variant="outline" 
-                    size="lg" 
+                  <Button
+                    variant="outline"
+                    size="lg"
                     className="border-2 border-purple-400 text-purple-600 hover:bg-purple-50 px-8 py-4 text-lg rounded-full"
                   >
                     <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                      <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
                     </svg>
                     Need Help? Follow Us
                   </Button>
@@ -2250,16 +2256,16 @@ export default function App() {
             {/* College Photos */}
             <div className="grid md:grid-cols-2 gap-6 mb-16">
               <div className="rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
-                <img 
+                <img
                   src="https://imgs.search.brave.com/9cn1qJqcslIJ7dghXNNeGr7W4Z88xiORw-Qs48dFANw/rs:fit:500:0:1:0/g:ce/aHR0cHM6Ly9hbnVy/YWcuYWMuaW4vd3At/Y29udGVudC91cGxv/YWRzLzIwMjMvMDMv/QWJvdXQtQW51cmFn/LWNvbGxlZ2UtMS5q/cGc"
-                  alt="Anurag University Campus" 
+                  alt="Anurag University Campus"
                   className="w-full h-64 object-cover hover:scale-105 transition-transform duration-300"
                 />
               </div>
               <div className="rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
-                <img 
+                <img
                   src="https://imgs.search.brave.com/oeRq5Kq72YWx9vLReCGy8JXTcJhgKzrTMgYsW7vDfzw/rs:fit:500:0:1:0/g:ce/aHR0cHM6Ly91cGxv/YWQud2lraW1lZGlh/Lm9yZy93aWtpcGVk/aWEvY29tbW9ucy8w/LzAzL0FudXJhZ19V/bml2ZXJzaXR5XyUy/MkVfQkxPQ0tfJl9G/X0JMT0NLJTIyX2lt/YWdlLmpwZw"
-                  alt="Anurag University Block" 
+                  alt="Anurag University Block"
                   className="w-full h-64 object-cover hover:scale-105 transition-transform duration-300"
                 />
               </div>
@@ -2416,24 +2422,23 @@ export default function App() {
               </div>
               <div>
                 <label className="text-sm font-medium mb-2 block">Profile Photo</label>
-                
+
                 {/* Drag and Drop Zone with Preview */}
                 <div
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  className={`relative border-2 border-dashed rounded-2xl overflow-hidden transition-all ${
-                    isDragging 
-                      ? 'border-pink-500 bg-pink-50 scale-105 shadow-lg' 
-                      : 'border-gray-300 hover:border-pink-400 hover:shadow-md'
-                  }`}
+                  className={`relative border-2 border-dashed rounded-2xl overflow-hidden transition-all ${isDragging
+                    ? 'border-pink-500 bg-pink-50 scale-105 shadow-lg'
+                    : 'border-gray-300 hover:border-pink-400 hover:shadow-md'
+                    }`}
                 >
                   {profileForm.photo_url ? (
                     // Show Preview
                     <div className="relative group">
-                      <img 
-                        src={profileForm.photo_url} 
-                        alt="Preview" 
+                      <img
+                        src={profileForm.photo_url}
+                        alt="Preview"
                         className="w-full h-64 object-cover"
                       />
                       {/* Overlay on hover */}
@@ -2523,8 +2528,8 @@ export default function App() {
                   </p>
                 )}
               </div>
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
                 disabled={loading}
               >
@@ -2575,7 +2580,7 @@ export default function App() {
                     <CardDescription>View and edit your profile information</CardDescription>
                   </div>
                   {!isEditingProfile && (
-                    <Button 
+                    <Button
                       onClick={() => setIsEditingProfile(true)}
                       className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
                     >
@@ -2655,27 +2660,27 @@ export default function App() {
                           <label className="text-sm font-medium text-gray-500 mb-3 block">Professional Links</label>
                           <div className="flex flex-wrap gap-3">
                             {currentUser.github && (
-                              <a 
+                              <a
                                 href={currentUser.github.startsWith('http') ? currentUser.github : `https://github.com/${currentUser.github}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all shadow-md hover:shadow-lg text-sm"
                               >
                                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                                 </svg>
                                 GitHub
                               </a>
                             )}
                             {currentUser.linkedin && (
-                              <a 
+                              <a
                                 href={currentUser.linkedin.startsWith('http') ? currentUser.linkedin : `https://linkedin.com/in/${currentUser.linkedin}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md hover:shadow-lg text-sm"
                               >
                                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                                  <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
                                 </svg>
                                 LinkedIn
                               </a>
@@ -2723,21 +2728,29 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="text-sm font-medium mb-2 block">Department</label>
+                        <label className="text-sm font-medium mb-2 block">
+                          Department <span className="text-red-500">*</span>
+                          <span className="text-xs text-red-500 font-normal ml-2">(Required - NOT "EG")</span>
+                        </label>
                         <Input
                           type="text"
-                          placeholder="e.g., CSE, ECE, ME"
+                          placeholder="Enter your branch: CSE, ECE, ME, EEE, IT (NOT 'EG')"
                           value={profileForm.department}
                           onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })}
+                          required
                         />
                       </div>
                       <div>
-                        <label className="text-sm font-medium mb-2 block">Year</label>
+                        <label className="text-sm font-medium mb-2 block">
+                          Year <span className="text-red-500">*</span>
+                          <span className="text-xs text-red-500 font-normal ml-2">(Required)</span>
+                        </label>
                         <Input
                           type="text"
                           placeholder="e.g., 1st, 2nd, 3rd, 4th"
                           value={profileForm.year}
                           onChange={(e) => setProfileForm({ ...profileForm, year: e.target.value })}
+                          required
                         />
                       </div>
                     </div>
@@ -2818,26 +2831,25 @@ export default function App() {
                         Profile Photo <span className="text-red-500">*</span>
                         <span className="text-xs text-red-500 font-normal ml-2">(Required - Upload your real photo)</span>
                       </label>
-                      
+
                       {/* Drag and Drop Zone with Preview */}
                       <div
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
-                        className={`relative border-2 border-dashed rounded-2xl overflow-hidden transition-all ${
-                          isDragging 
-                            ? 'border-pink-500 bg-pink-50 scale-105 shadow-lg' 
-                            : profileForm.photo_url 
-                              ? 'border-green-400 hover:border-pink-400 hover:shadow-md' 
-                              : 'border-red-300 hover:border-pink-400 hover:shadow-md'
-                        }`}
+                        className={`relative border-2 border-dashed rounded-2xl overflow-hidden transition-all ${isDragging
+                          ? 'border-pink-500 bg-pink-50 scale-105 shadow-lg'
+                          : profileForm.photo_url
+                            ? 'border-green-400 hover:border-pink-400 hover:shadow-md'
+                            : 'border-red-300 hover:border-pink-400 hover:shadow-md'
+                          }`}
                       >
                         {profileForm.photo_url ? (
                           // Show Preview
                           <div className="relative group">
-                            <img 
-                              src={profileForm.photo_url} 
-                              alt="Preview" 
+                            <img
+                              src={profileForm.photo_url}
+                              alt="Preview"
                               className="w-full h-64 object-cover"
                             />
                             {/* Overlay on hover */}
@@ -2945,11 +2957,11 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    
+
                     {/* Action Buttons */}
                     <div className="flex gap-3 pt-2">
-                      <Button 
-                        type="submit" 
+                      <Button
+                        type="submit"
                         className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={loading || uploadingPhoto || !profileForm.photo_url}
                         onClick={() => console.log('Save button clicked, loading:', loading, 'uploadingPhoto:', uploadingPhoto, 'hasPhoto:', !!profileForm.photo_url)}
@@ -2970,7 +2982,7 @@ export default function App() {
                           'Save Changes'
                         )}
                       </Button>
-                      <Button 
+                      <Button
                         type="button"
                         variant="outline"
                         onClick={() => {
@@ -3011,26 +3023,26 @@ export default function App() {
   const EventCard = ({ event }) => {
     const getStatusBadge = (status) => {
       const badges = {
-        upcoming: { 
-          color: "bg-gradient-to-r from-blue-500 to-blue-600", 
+        upcoming: {
+          color: "bg-gradient-to-r from-blue-500 to-blue-600",
           text: "Upcoming",
           icon: "📅",
           glow: "shadow-blue-500/50"
         },
-        ongoing: { 
-          color: "bg-gradient-to-r from-green-500 to-emerald-600", 
+        ongoing: {
+          color: "bg-gradient-to-r from-green-500 to-emerald-600",
           text: "Live Now",
           icon: "🔴",
           glow: "shadow-green-500/50 animate-pulse"
         },
-        completed: { 
-          color: "bg-gradient-to-r from-gray-500 to-gray-600", 
+        completed: {
+          color: "bg-gradient-to-r from-gray-500 to-gray-600",
           text: "Completed",
           icon: "✓",
           glow: "shadow-gray-500/50"
         },
-        cancelled: { 
-          color: "bg-gradient-to-r from-red-500 to-red-600", 
+        cancelled: {
+          color: "bg-gradient-to-r from-red-500 to-red-600",
           text: "Cancelled",
           icon: "✕",
           glow: "shadow-red-500/50"
@@ -3042,7 +3054,7 @@ export default function App() {
     const statusBadge = getStatusBadge(event.status)
 
     return (
-      <div 
+      <div
         className="group relative bg-white rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-500 cursor-pointer transform hover:-translate-y-3 border border-gray-100 hover:border-purple-200"
         onClick={() => {
           setSelectedEvent(event)
@@ -3051,7 +3063,7 @@ export default function App() {
       >
         {/* Gradient Overlay Effect */}
         <div className="absolute inset-0 bg-gradient-to-br from-purple-50/0 to-blue-50/0 group-hover:from-purple-50/50 group-hover:to-blue-50/50 transition-all duration-500 pointer-events-none z-10"></div>
-        
+
         {/* Event Image */}
         <div className="relative h-56 bg-gradient-to-br from-indigo-400 via-purple-400 to-pink-400 overflow-hidden">
           {event.image_url ? (
@@ -3068,16 +3080,16 @@ export default function App() {
               </div>
             </div>
           )}
-          
+
           {/* Dark Overlay for Text Readability */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent"></div>
-          
+
           {/* Status Badge */}
           <div className={`absolute top-4 right-4 ${statusBadge.color} ${statusBadge.glow} text-white px-4 py-2 rounded-full text-sm font-bold shadow-2xl backdrop-blur-sm flex items-center gap-2`}>
             <span>{statusBadge.icon}</span>
             <span>{statusBadge.text}</span>
           </div>
-          
+
           {/* Category Badge */}
           <div className={`absolute top-4 left-4 ${getCategoryColor(event.category)} text-white px-4 py-2 rounded-full text-sm font-bold shadow-2xl backdrop-blur-sm`}>
             {event.category}
@@ -3115,7 +3127,7 @@ export default function App() {
               </div>
               <span className="text-sm font-semibold">{event.event_time}</span>
             </div>
-            
+
             <div className="flex items-center gap-3 text-gray-700 bg-red-50/50 rounded-lg p-2">
               <div className="bg-red-100 p-2 rounded-lg">
                 <MapPin className="h-4 w-4 text-red-600" />
@@ -3173,7 +3185,7 @@ export default function App() {
                   <div className="w-32 h-32 bg-yellow-300/30 rounded-full animate-ping"></div>
                 </div>
               </div>
-              
+
               <div>
                 <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-red-600 mb-2">
                   BONUS REWARD!
@@ -3185,7 +3197,7 @@ export default function App() {
                   Valid for next 10 minutes only!
                 </p>
               </div>
-              
+
               {/* Countdown */}
               <div className="bg-white/80 backdrop-blur rounded-xl p-4 border-2 border-orange-300">
                 <p className="text-xs text-gray-600 mb-2">{bonusClaimed ? 'Reward Claimed! ✅' : 'Claim before time expires:'}</p>
@@ -3199,7 +3211,7 @@ export default function App() {
                   {bonusClaimed && <span className="text-green-600">✓</span>}
                 </div>
               </div>
-              
+
               {!bonusClaimed ? (
                 <>
                   <button
@@ -3208,7 +3220,7 @@ export default function App() {
                   >
                     💎 Collect 3 Bonus Likes NOW!
                   </button>
-                  
+
                   <button
                     onClick={() => setShowBonusModal(false)}
                     className="text-sm text-gray-600 hover:text-gray-800 underline"
@@ -3231,7 +3243,7 @@ export default function App() {
           </div>
         </div>
       )}
-      
+
       {/* Header */}
       <div className="bg-white border-b shadow-sm">
         <div className="container mx-auto px-4 py-3 md:py-4">
@@ -3251,7 +3263,7 @@ export default function App() {
               >
                 <HelpCircle className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
               </button>
-              
+
               {/* Notification Bell */}
               <div className="relative">
                 <button
@@ -3267,8 +3279,8 @@ export default function App() {
                   )}
                 </button>
               </div>
-              
-              <button 
+
+              <button
                 onClick={openMyProfile}
                 className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-2 md:px-3 py-2 transition-colors"
               >
@@ -3297,7 +3309,7 @@ export default function App() {
                   </div>
                   <h2 className="text-lg sm:text-xl md:text-2xl font-bold">Need Help?</h2>
                 </div>
-                <button 
+                <button
                   onClick={() => setShowHelpModal(false)}
                   className="p-1 hover:bg-white/20 rounded-full transition-colors flex-shrink-0"
                 >
@@ -3313,7 +3325,7 @@ export default function App() {
                 <p className="text-gray-700 font-medium text-xs sm:text-sm md:text-base px-2">
                   📱 For any queries, DM me on Instagram
                 </p>
-                
+
                 <a
                   href="https://www.instagram.com/anurag_slines?utm_source=qr&igsh=ZThxb3B2MnNqaTJ1"
                   target="_blank"
@@ -3321,11 +3333,11 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 sm:gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-5 md:px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base"
                 >
                   <svg className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
                   </svg>
                   <span className="whitespace-nowrap">@anurag_slines</span>
                 </a>
-                
+
                 <p className="text-[10px] sm:text-xs md:text-sm text-purple-600 font-semibold px-2">
                   👉 Follow for updates and announcements!
                 </p>
@@ -3346,7 +3358,7 @@ export default function App() {
                   <Bell className="h-5 w-5 sm:h-6 sm:w-6 text-purple-600 flex-shrink-0" />
                   <h3 className="text-base sm:text-lg md:text-xl lg:text-2xl font-bold text-gray-800">Notifications</h3>
                 </div>
-                <button 
+                <button
                   onClick={() => setShowNotifications(false)}
                   className="p-1.5 sm:p-2 hover:bg-purple-100 rounded-full transition-colors flex-shrink-0"
                 >
@@ -3391,7 +3403,7 @@ export default function App() {
               </TabsList>
 
               {/* Friend Requests Tab */}
-              <TabsContent value="requests" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4" style={{maxHeight: 'calc(90vh - 180px)'}}>
+              <TabsContent value="requests" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4" style={{ maxHeight: 'calc(90vh - 180px)' }}>
                 {friendRequests.length === 0 ? (
                   <div className="py-12 text-center text-gray-500">
                     <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
@@ -3420,7 +3432,7 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      
+
                       <CardContent className="p-4 space-y-3">
                         {/* Bio */}
                         {request.bio && (
@@ -3428,7 +3440,7 @@ export default function App() {
                             <p className="text-sm text-gray-700 line-clamp-2">{request.bio}</p>
                           </div>
                         )}
-                        
+
                         {/* Interests */}
                         {request.interests && request.interests.length > 0 && (
                           <div>
@@ -3447,7 +3459,7 @@ export default function App() {
                             </div>
                           </div>
                         )}
-                        
+
                         {/* Action Buttons */}
                         <div className="grid grid-cols-3 gap-2 pt-2">
                           <Button
@@ -3493,7 +3505,7 @@ export default function App() {
               </TabsContent>
 
               {/* Warnings Tab */}
-              <TabsContent value="warnings" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3" style={{maxHeight: 'calc(90vh - 180px)'}}>
+              <TabsContent value="warnings" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3" style={{ maxHeight: 'calc(90vh - 180px)' }}>
                 {warnings.length === 0 ? (
                   <div className="py-12 text-center text-gray-500">
                     <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
@@ -3534,7 +3546,7 @@ export default function App() {
                     </div>
                   ))
                 )}
-                
+
                 {warnings.length > 0 && (
                   <div className="pt-3 border-t text-center">
                     <button
@@ -3581,7 +3593,7 @@ export default function App() {
                     <div className="flex-1 min-w-0">
                       <h3 className="font-bold text-purple-900 mb-1 sm:mb-2 text-sm sm:text-base md:text-lg leading-tight">Start Making Connections!</h3>
                       <p className="text-xs sm:text-sm text-gray-700 leading-relaxed">
-                        Find friends, make connections, and build meaningful relationships. 
+                        Find friends, make connections, and build meaningful relationships.
                         Be respectful and enjoy your experience! 💖
                       </p>
                     </div>
@@ -3598,7 +3610,7 @@ export default function App() {
                     <p className="text-[10px] sm:text-xs text-gray-700 px-2">
                       📱 For any queries or support, DM me on Instagram
                     </p>
-                    
+
                     <a
                       href="https://www.instagram.com/anurag_slines?utm_source=qr&igsh=ZThxb3B2MnNqaTJ1"
                       target="_blank"
@@ -3606,11 +3618,11 @@ export default function App() {
                       className="inline-flex items-center gap-1.5 sm:gap-2 bg-gradient-to-r from-pink-500 via-purple-500 to-pink-500 hover:from-pink-600 hover:via-purple-600 hover:to-pink-600 text-white font-bold py-2 sm:py-2.5 md:py-3 px-4 sm:px-5 md:px-6 rounded-full shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base"
                     >
                       <svg className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
                       </svg>
                       <span className="whitespace-nowrap">@anurag_slines</span>
                     </a>
-                    
+
                     <p className="text-[10px] sm:text-xs text-purple-700 font-semibold px-2">
                       👉 Follow for updates & announcements!
                     </p>
@@ -3644,11 +3656,10 @@ export default function App() {
                     setMainNav('home')
                     // Don't clear unread here - only clear when opening Friends tab
                   }}
-                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
-                    mainNav === 'home'
-                      ? 'bg-gradient-to-r from-pink-500 via-purple-500 to-pink-600 text-white shadow-xl shadow-pink-300/50 scale-105'
-                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-pink-100 hover:to-purple-100 shadow-md hover:shadow-lg border-2 border-purple-200'
-                  }`}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'home'
+                    ? 'bg-gradient-to-r from-pink-500 via-purple-500 to-pink-600 text-white shadow-xl shadow-pink-300/50 scale-105'
+                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-pink-100 hover:to-purple-100 shadow-md hover:shadow-lg border-2 border-purple-200'
+                    }`}
                 >
                   <Home className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'home' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Home</span>
@@ -3665,11 +3676,10 @@ export default function App() {
                 {/* Events Button - Placeholder for future */}
                 <button
                   onClick={() => setMainNav('events')}
-                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
-                    mainNav === 'events'
-                      ? 'bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-600 text-white shadow-xl shadow-blue-300/50 scale-105'
-                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 shadow-md hover:shadow-lg border-2 border-blue-200'
-                  }`}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'events'
+                    ? 'bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-600 text-white shadow-xl shadow-blue-300/50 scale-105'
+                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 shadow-md hover:shadow-lg border-2 border-blue-200'
+                    }`}
                 >
                   <Calendar className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'events' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Events</span>
@@ -3678,11 +3688,10 @@ export default function App() {
                 {/* Achievements Button */}
                 <button
                   onClick={() => setMainNav('achievements')}
-                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
-                    mainNav === 'achievements'
-                      ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 text-white shadow-xl shadow-amber-300/50 scale-105'
-                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-amber-100 hover:to-yellow-100 shadow-md hover:shadow-lg border-2 border-amber-200'
-                  }`}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'achievements'
+                    ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 text-white shadow-xl shadow-amber-300/50 scale-105'
+                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-amber-100 hover:to-yellow-100 shadow-md hover:shadow-lg border-2 border-amber-200'
+                    }`}
                 >
                   <Trophy className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'achievements' ? 'animate-bounce' : ''}`} />
                   <span className="hidden sm:inline">🏅 Wins</span>
@@ -3697,11 +3706,10 @@ export default function App() {
                       setMainNav('dice')
                     }
                   }}
-                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${
-                    mainNav === 'dice'
-                      ? 'bg-gradient-to-r from-orange-500 via-red-500 to-pink-600 text-white shadow-xl shadow-orange-300/50 scale-105'
-                      : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-orange-100 hover:to-pink-100 shadow-md hover:shadow-lg border-2 border-orange-200'
-                  }`}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'dice'
+                    ? 'bg-gradient-to-r from-orange-500 via-red-500 to-pink-600 text-white shadow-xl shadow-orange-300/50 scale-105'
+                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-orange-100 hover:to-pink-100 shadow-md hover:shadow-lg border-2 border-orange-200'
+                    }`}
                 >
                   <Dices className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'dice' ? 'animate-bounce' : ''}`} />
                   <span className="hidden sm:inline">🎲 Dice</span>
@@ -3721,8 +3729,8 @@ export default function App() {
 
         {/* Home Section - Contains Discover, Top, Search, Friends, Blocked */}
         {mainNav === 'home' && (
-          <Tabs 
-            defaultValue="discover" 
+          <Tabs
+            defaultValue="discover"
             value={activeTab}
             className="w-full overflow-x-hidden"
             onValueChange={(value) => {
@@ -3734,26 +3742,26 @@ export default function App() {
           >
             {/* Desktop TabsList - Premium Grid with Animations */}
             <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-5 mb-8 bg-white shadow-lg rounded-2xl p-2 border-2 border-purple-100 gap-2">
-              <TabsTrigger 
+              <TabsTrigger
                 value="discover"
                 className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-pink-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-pink-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 Discover
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="leaderboard"
                 className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-yellow-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-yellow-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 🏆 Top
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="search"
                 className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 Search
               </TabsTrigger>
-              <TabsTrigger 
-                value="matches" 
+              <TabsTrigger
+                value="matches"
                 className="relative data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-green-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 Friends
@@ -3766,8 +3774,8 @@ export default function App() {
                   </span>
                 )}
               </TabsTrigger>
-              <TabsTrigger 
-                value="blocked" 
+              <TabsTrigger
+                value="blocked"
                 className="relative data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-gray-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
               >
                 Blocked
@@ -3777,31 +3785,31 @@ export default function App() {
             {/* Mobile TabsList - Zig-Zag Layout with proper structure */}
             <TabsList className="md:hidden mb-8 px-3 h-auto flex-col gap-2 bg-transparent animate-fade-in">
               {/* Row 1 - 3 items */}
-              <div className="flex gap-2 justify-center w-full animate-slide-in-up" style={{animationDelay: '0.1s'}}>
-                <TabsTrigger 
-                  value="discover" 
+              <div className="flex gap-2 justify-center w-full animate-slide-in-up" style={{ animationDelay: '0.1s' }}>
+                <TabsTrigger
+                  value="discover"
                   className="flex-1 max-w-[110px] rounded-full shadow-lg bg-gradient-to-br from-pink-50 to-purple-50 data-[state=active]:from-pink-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-pink-300/50 border-2 border-pink-200 data-[state=active]:border-pink-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   Discover
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="leaderboard" 
+                <TabsTrigger
+                  value="leaderboard"
                   className="flex-1 max-w-[110px] rounded-full shadow-lg bg-gradient-to-br from-yellow-50 to-orange-50 data-[state=active]:from-yellow-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-yellow-300/50 border-2 border-yellow-200 data-[state=active]:border-yellow-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   🏆 Top
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="search" 
+                <TabsTrigger
+                  value="search"
                   className="flex-1 max-w-[110px] rounded-full shadow-lg bg-gradient-to-br from-blue-50 to-cyan-50 data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-blue-300/50 border-2 border-blue-200 data-[state=active]:border-blue-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   Search
                 </TabsTrigger>
               </div>
-              
+
               {/* Row 2 - 2 items (centered, creating zig-zag effect) */}
-              <div className="flex gap-2 justify-center w-full animate-slide-in-up" style={{animationDelay: '0.2s'}}>
-                <TabsTrigger 
-                  value="matches" 
+              <div className="flex gap-2 justify-center w-full animate-slide-in-up" style={{ animationDelay: '0.2s' }}>
+                <TabsTrigger
+                  value="matches"
                   className="relative flex-1 max-w-[170px] rounded-full shadow-lg bg-gradient-to-br from-green-50 to-emerald-50 data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-green-300/50 border-2 border-green-200 data-[state=active]:border-green-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   Friends
@@ -3814,8 +3822,8 @@ export default function App() {
                     </span>
                   )}
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="blocked" 
+                <TabsTrigger
+                  value="blocked"
                   className="relative flex-1 max-w-[170px] rounded-full shadow-lg bg-gradient-to-br from-gray-50 to-slate-50 data-[state=active]:from-gray-500 data-[state=active]:to-slate-500 data-[state=active]:text-white data-[state=active]:shadow-xl data-[state=active]:shadow-gray-300/50 border-2 border-gray-200 data-[state=active]:border-gray-400 py-3 px-4 text-xs font-bold transition-all duration-300 hover:scale-110 hover:shadow-xl active:scale-95"
                 >
                   Blocked
@@ -3823,1469 +3831,1089 @@ export default function App() {
               </div>
             </TabsList>
 
-          {/* Discover Tab */}
-          <TabsContent value="discover" className="overflow-x-hidden">
-            <div className="max-w-2xl mx-auto px-4">
-              {/* Modern Animated Header */}
-              <div className="text-center mb-8 relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 blur-3xl -z-10 animate-pulse"></div>
-                <h2 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 mb-2">
-                  Discover Students
-                </h2>
-                <p className="text-gray-600 text-sm font-medium">Find your perfect match at Anurag University</p>
-              </div>
-              
-              {currentProfileIndex >= profiles.length ? (
-                <div className="relative">
-                  {/* Glassmorphism card */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-pink-200/50 via-purple-200/50 to-blue-200/50 blur-2xl"></div>
-                  <Card className="relative backdrop-blur-xl bg-white/60 border-2 border-white/50 shadow-2xl p-12 rounded-3xl overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-pink-300/30 to-purple-300/30 rounded-full blur-3xl -mr-32 -mt-32"></div>
-                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-gradient-to-tr from-blue-300/30 to-purple-300/30 rounded-full blur-3xl -ml-32 -mb-32"></div>
-                    <div className="text-center text-gray-600 relative z-10">
-                      <div className="relative inline-block mb-6">
-                        <Heart className="h-20 w-20 mx-auto text-pink-400 animate-bounce" />
-                        <div className="absolute inset-0 bg-pink-400/30 blur-2xl animate-pulse"></div>
-                      </div>
-                      <p className="text-2xl font-bold mb-2 text-gray-800">No more profiles to show</p>
-                      <p className="text-base mt-2 mb-6 text-gray-600">Check back later for new students!</p>
-                      <Button 
-                        onClick={() => setCurrentProfileIndex(0)}
-                        className="mt-4 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 hover:from-pink-700 hover:via-purple-700 hover:to-blue-700 text-white px-8 py-6 text-lg font-bold rounded-2xl shadow-2xl hover:shadow-pink-500/50 transition-all duration-300 hover:scale-105 active:scale-95"
-                      >
-                        <Sparkles className="mr-2 h-5 w-5" />
-                        Start Over
-                      </Button>
-                    </div>
-                  </Card>
+            {/* Discover Tab */}
+            <TabsContent value="discover" className="overflow-x-hidden">
+              <div className="max-w-2xl mx-auto px-4">
+                {/* Modern Animated Header */}
+                <div className="text-center mb-8 relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 blur-3xl -z-10 animate-pulse"></div>
+                  <h2 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 mb-2">
+                    Discover Students
+                  </h2>
+                  <p className="text-gray-600 text-sm font-medium">Find your perfect match at Anurag University</p>
                 </div>
-              ) : (
-                <div className="relative pb-4">
-                  {/* Swipe Card Container with 3D effect */}
-                  <div className="swipe-container relative min-h-[600px] flex items-center justify-center mb-8" style={{ perspective: '1000px' }}>
-                    {/* Background glow effects */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-pink-300/20 via-purple-300/20 to-blue-300/20 blur-3xl animate-pulse"></div>
-                    
-                    {profiles[currentProfileIndex] && (
-                      <Card 
-                        className={`relative w-full max-w-md mx-auto overflow-hidden shadow-2xl transition-all duration-500 rounded-3xl border-2 border-white/60 hover:shadow-pink-500/30 ${
-                          swipeDirection === 'left' ? 'translate-x-[-150%] rotate-[-20deg] opacity-0' :
-                          swipeDirection === 'right' ? 'translate-x-[150%] rotate-[20deg] opacity-0' :
-                          'translate-x-0 rotate-0 opacity-100 hover:scale-[1.02]'
-                        }`}
-                        style={{
-                          transformStyle: 'preserve-3d',
-                          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 60px -15px rgba(236, 72, 153, 0.3)'
-                        }}
-                        onTouchStart={handleTouchStart}
-                        onTouchMove={handleTouchMove}
-                        onTouchEnd={handleTouchEnd}
-                      >
-                        {/* Photo Section with enhanced gradient */}
-                        <div 
-                          className="relative h-[450px] bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 overflow-hidden cursor-pointer"
-                          onClick={() => openProfileView(profiles[currentProfileIndex])}
+
+                {currentProfileIndex >= profiles.length ? (
+                  <div className="relative">
+                    {/* Glassmorphism card */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-pink-200/50 via-purple-200/50 to-blue-200/50 blur-2xl"></div>
+                    <Card className="relative backdrop-blur-xl bg-white/60 border-2 border-white/50 shadow-2xl p-12 rounded-3xl overflow-hidden">
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-pink-300/30 to-purple-300/30 rounded-full blur-3xl -mr-32 -mt-32"></div>
+                      <div className="absolute bottom-0 left-0 w-64 h-64 bg-gradient-to-tr from-blue-300/30 to-purple-300/30 rounded-full blur-3xl -ml-32 -mb-32"></div>
+                      <div className="text-center text-gray-600 relative z-10">
+                        <div className="relative inline-block mb-6">
+                          <Heart className="h-20 w-20 mx-auto text-pink-400 animate-bounce" />
+                          <div className="absolute inset-0 bg-pink-400/30 blur-2xl animate-pulse"></div>
+                        </div>
+                        <p className="text-2xl font-bold mb-2 text-gray-800">No more profiles to show</p>
+                        <p className="text-base mt-2 mb-6 text-gray-600">Check back later for new students!</p>
+                        <Button
+                          onClick={() => setCurrentProfileIndex(0)}
+                          className="mt-4 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 hover:from-pink-700 hover:via-purple-700 hover:to-blue-700 text-white px-8 py-6 text-lg font-bold rounded-2xl shadow-2xl hover:shadow-pink-500/50 transition-all duration-300 hover:scale-105 active:scale-95"
                         >
-                          {profiles[currentProfileIndex].photo_url ? (
-                            <img 
-                              src={profiles[currentProfileIndex].photo_url} 
-                              alt={profiles[currentProfileIndex].name} 
-                              className="w-full h-full object-cover transition-transform duration-700 hover:scale-110"
-                            />
-                          ) : (
-                            <div className="flex items-center justify-center h-full relative">
-                              <div className="absolute inset-0 bg-gradient-to-br from-pink-200 via-purple-200 to-blue-200 opacity-50"></div>
-                              <User className="h-40 w-40 text-white/80 relative z-10" />
-                            </div>
-                          )}
-                          
-                          {/* Enhanced gradient overlay */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
-                          
-                          {/* Decorative elements */}
-                          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-white/20 to-transparent rounded-full blur-2xl"></div>
-                          <div className="absolute bottom-0 left-0 w-40 h-40 bg-gradient-to-tr from-purple-500/30 to-transparent rounded-full blur-3xl"></div>
-                          
-                          {/* Info overlay with glassmorphism */}
-                          <div className="absolute bottom-0 left-0 right-0 p-6 text-white backdrop-blur-sm bg-gradient-to-t from-black/60 to-transparent">
-                            <h2 className="text-4xl font-black mb-2 drop-shadow-2xl tracking-tight">
-                              {profiles[currentProfileIndex].name}
-                              {profiles[currentProfileIndex].year && (
-                                <span className="text-2xl ml-2 opacity-95 font-bold">, {profiles[currentProfileIndex].year}</span>
-                              )}
-                            </h2>
-                            {profiles[currentProfileIndex].department && (
-                              <div className="inline-block backdrop-blur-md bg-white/20 px-4 py-2 rounded-full border border-white/30">
-                                <p className="text-base font-semibold drop-shadow-lg flex items-center gap-2">
-                                  <span className="text-xl">📚</span>
-                                  {profiles[currentProfileIndex].department}
-                                </p>
+                          <Sparkles className="mr-2 h-5 w-5" />
+                          Start Over
+                        </Button>
+                      </div>
+                    </Card>
+                  </div>
+                ) : (
+                  <div className="relative pb-4">
+                    {/* Swipe Card Container with 3D effect */}
+                    <div className="swipe-container relative min-h-[600px] flex items-center justify-center mb-8" style={{ perspective: '1000px' }}>
+                      {/* Background glow effects */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-pink-300/20 via-purple-300/20 to-blue-300/20 blur-3xl animate-pulse"></div>
+
+                      {profiles[currentProfileIndex] && (
+                        <Card
+                          className={`relative w-full max-w-md mx-auto overflow-hidden shadow-2xl transition-all duration-500 rounded-3xl border-2 border-white/60 hover:shadow-pink-500/30 ${swipeDirection === 'left' ? 'translate-x-[-150%] rotate-[-20deg] opacity-0' :
+                            swipeDirection === 'right' ? 'translate-x-[150%] rotate-[20deg] opacity-0' :
+                              'translate-x-0 rotate-0 opacity-100 hover:scale-[1.02]'
+                            }`}
+                          style={{
+                            transformStyle: 'preserve-3d',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 60px -15px rgba(236, 72, 153, 0.3)'
+                          }}
+                          onTouchStart={handleTouchStart}
+                          onTouchMove={handleTouchMove}
+                          onTouchEnd={handleTouchEnd}
+                        >
+                          {/* Photo Section with enhanced gradient */}
+                          <div
+                            className="relative h-[450px] bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 overflow-hidden cursor-pointer"
+                            onClick={() => openProfileView(profiles[currentProfileIndex])}
+                          >
+                            {profiles[currentProfileIndex].photo_url ? (
+                              <img
+                                src={profiles[currentProfileIndex].photo_url}
+                                alt={profiles[currentProfileIndex].name}
+                                className="w-full h-full object-cover transition-transform duration-700 hover:scale-110"
+                              />
+                            ) : (
+                              <div className="flex items-center justify-center h-full relative">
+                                <div className="absolute inset-0 bg-gradient-to-br from-pink-200 via-purple-200 to-blue-200 opacity-50"></div>
+                                <User className="h-40 w-40 text-white/80 relative z-10" />
                               </div>
                             )}
-                          </div>
 
-                          {/* Unlike button or Send Request button */}
-                          {likedProfiles.has(profiles[currentProfileIndex].id) ? (
-                            <Button
-                              className="absolute top-6 right-6 backdrop-blur-xl bg-red-500/90 hover:bg-red-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleUnlike(profiles[currentProfileIndex].id)
-                              }}
-                            >
-                              <HeartCrack className="h-4 w-4 mr-2" />
-                              Unlike
-                            </Button>
-                          ) : (
-                            <Button
-                              className="absolute top-6 right-6 backdrop-blur-xl bg-pink-500/90 hover:bg-pink-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                sendFriendRequest(profiles[currentProfileIndex].id)
-                              }}
-                            >
-                              <Heart className="h-4 w-4 mr-2" />
-                              Send Request
-                            </Button>
-                          )}
-                        </div>
+                            {/* Enhanced gradient overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
 
-                        {/* Quick Info Section with gradient background */}
-                        <CardContent 
-                          className="p-6 bg-gradient-to-br from-white via-pink-50/30 to-purple-50/30 backdrop-blur-sm cursor-pointer"
-                          onClick={() => openProfileView(profiles[currentProfileIndex])}
-                        >
-                          {/* Bio Preview */}
-                          {profiles[currentProfileIndex].bio && (
-                            <div className="mb-4 p-4 backdrop-blur-sm bg-white/60 rounded-2xl border border-white/50 shadow-md">
-                              <p className="text-gray-800 text-sm line-clamp-3 leading-relaxed font-medium">
-                                💭 {profiles[currentProfileIndex].bio}
-                              </p>
-                            </div>
-                          )}
+                            {/* Decorative elements */}
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-white/20 to-transparent rounded-full blur-2xl"></div>
+                            <div className="absolute bottom-0 left-0 w-40 h-40 bg-gradient-to-tr from-purple-500/30 to-transparent rounded-full blur-3xl"></div>
 
-                          {/* Interests Preview with modern pills */}
-                          {profiles[currentProfileIndex].interests && profiles[currentProfileIndex].interests.length > 0 && (
-                            <div className="flex flex-wrap gap-2">
-                              {profiles[currentProfileIndex].interests.slice(0, 4).map((interest, idx) => (
-                                <Badge 
-                                  key={idx} 
-                                  className="text-xs px-4 py-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white font-semibold rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105 border-2 border-white/50"
-                                >
-                                  {interest}
-                                </Badge>
-                              ))}
-                              {profiles[currentProfileIndex].interests.length > 4 && (
-                                <Badge className="text-xs px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold rounded-full shadow-lg border-2 border-white/50">
-                                  +{profiles[currentProfileIndex].interests.length - 4} more
-                                </Badge>
-                              )}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
-
-                  {/* Action Buttons with modern design */}
-                  <div className="flex justify-center items-center gap-6 mb-4">
-                    {/* Pass Button */}
-                    <button
-                      onClick={handleSwipeLeft}
-                      className="relative w-20 h-20 rounded-full bg-gradient-to-br from-red-400 to-red-600 shadow-2xl hover:shadow-red-500/50 transition-all border-4 border-white hover:scale-110 active:scale-95 flex items-center justify-center group overflow-hidden"
-                      aria-label="Pass"
-                    >
-                      <div className="absolute inset-0 bg-white/20 group-hover:bg-white/30 transition-all"></div>
-                      <X className="h-10 w-10 text-white relative z-10" strokeWidth={3} />
-                      <div className="absolute inset-0 bg-red-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
-                    </button>
-
-                    {/* Like Button */}
-                    <button
-                      onClick={handleSwipeRight}
-                      disabled={likedProfiles.has(profiles[currentProfileIndex]?.id)}
-                      className={`relative w-20 h-20 rounded-full shadow-2xl transition-all border-4 border-white active:scale-95 flex items-center justify-center group overflow-hidden ${
-                        likedProfiles.has(profiles[currentProfileIndex]?.id)
-                          ? 'bg-gradient-to-br from-gray-300 to-gray-400 cursor-not-allowed opacity-60'
-                          : 'bg-gradient-to-br from-green-400 to-green-600 hover:shadow-green-500/50 hover:scale-110'
-                      }`}
-                      aria-label="Like"
-                    >
-                      <div className={`absolute inset-0 ${likedProfiles.has(profiles[currentProfileIndex]?.id) ? '' : 'bg-white/20 group-hover:bg-white/30'} transition-all`}></div>
-                      <Heart className={`h-10 w-10 relative z-10 ${
-                        likedProfiles.has(profiles[currentProfileIndex]?.id)
-                          ? 'text-white fill-white'
-                          : 'text-white fill-white'
-                      }`} strokeWidth={3} />
-                      {!likedProfiles.has(profiles[currentProfileIndex]?.id) && (
-                        <div className="absolute inset-0 bg-green-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Keyboard shortcuts hint with modern style */}
-                  <div className="text-center mt-6">
-                    <div className="inline-block backdrop-blur-md bg-white/70 px-6 py-3 rounded-full border border-white/50 shadow-lg">
-                      <p className="text-xs text-gray-700 font-semibold flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-purple-500" />
-                        Use ← → arrow keys or swipe on mobile
-                        <Sparkles className="h-4 w-4 text-pink-500" />
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Full Profile Modal */}
-            {showProfileModal && selectedProfile && (
-              <div 
-                className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
-                onClick={closeProfileView}
-              >
-                <div 
-                  className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Header with photo */}
-                  <div className="relative h-80 bg-gradient-to-br from-pink-200 to-purple-200">
-                    {selectedProfile.photo_url ? (
-                      <img 
-                        src={selectedProfile.photo_url} 
-                        alt={selectedProfile.name} 
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <User className="h-32 w-32 text-gray-400" />
-                      </div>
-                    )}
-
-                    {/* Gradient overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent"></div>
-                    
-                    {/* Name overlay */}
-                    <div className="absolute bottom-6 left-6 right-6 text-white">
-                      <h1 className="text-4xl font-bold mb-2 drop-shadow-lg">
-                        {selectedProfile.name}
-                      </h1>
-                      {selectedProfile.department && selectedProfile.year && (
-                        <p className="text-lg opacity-95 drop-shadow-md">
-                          📚 {selectedProfile.department} • {selectedProfile.year} Year
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Content */}
-                  <div className="p-6 space-y-6">
-                    {/* Bio */}
-                    {selectedProfile.bio && (
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
-                          <span className="text-2xl">💭</span>
-                          About
-                        </h3>
-                        <p className="text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
-                      </div>
-                    )}
-
-                    {/* Interests */}
-                    {selectedProfile.interests && selectedProfile.interests.length > 0 && (
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-                          <span className="text-2xl">🎯</span>
-                          Interests
-                        </h3>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedProfile.interests.map((interest, idx) => (
-                            <Badge 
-                              key={idx} 
-                              variant="secondary" 
-                              className="text-sm px-4 py-2"
-                            >
-                              {interest}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Email */}
-                    {selectedProfile.email && (
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
-                          <span className="text-2xl">📧</span>
-                          Contact
-                        </h3>
-                        <div className="flex items-center gap-2 text-gray-700">
-                          <Mail className="h-5 w-5" />
-                          <span>{selectedProfile.email}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Social Media Links */}
-                    {(selectedProfile.instagram || selectedProfile.github || selectedProfile.linkedin) && (
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
-                          <span className="text-2xl">🔗</span>
-                          Connect
-                        </h3>
-                        <div className="flex flex-wrap gap-3">
-                          {selectedProfile.instagram && (
-                            <a 
-                              href={selectedProfile.instagram.startsWith('http') ? selectedProfile.instagram : `https://instagram.com/${selectedProfile.instagram.replace('@', '')}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all shadow-md hover:shadow-lg"
-                            >
-                              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                              </svg>
-                              Instagram
-                            </a>
-                          )}
-                          {selectedProfile.github && (
-                            <a 
-                              href={selectedProfile.github.startsWith('http') ? selectedProfile.github : `https://github.com/${selectedProfile.github}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all shadow-md hover:shadow-lg"
-                            >
-                              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                              </svg>
-                              GitHub
-                            </a>
-                          )}
-                          {selectedProfile.linkedin && (
-                            <a 
-                              href={selectedProfile.linkedin.startsWith('http') ? selectedProfile.linkedin : `https://linkedin.com/in/${selectedProfile.linkedin}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md hover:shadow-lg"
-                            >
-                              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-                              </svg>
-                              LinkedIn
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* Leaderboard Tab */}
-          <TabsContent value="leaderboard">
-            <div className="max-w-4xl mx-auto px-3 md:px-4">
-              <div className="text-center mb-6 md:mb-8">
-                <h2 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 mb-2">
-                  🏆 Leaderboard
-                </h2>
-                <p className="text-sm md:text-base text-gray-600">Most liked profiles on Anurag Connect</p>
-                
-                {/* Countdown Timer */}
-                {(leaderboardType === 'daily' || leaderboardType === 'weekly') && (
-                  <div className="mt-4 inline-block bg-gradient-to-r from-orange-100 to-red-100 px-4 py-2 rounded-full border-2 border-orange-300">
-                    <p className="text-sm md:text-base font-bold text-orange-700">
-                      ⏰ {leaderboardType === 'daily' ? 'Daily' : 'Weekly'} reset in {countdown.hours}h {countdown.minutes}m {countdown.seconds}s
-                    </p>
-                    <p className="text-xs text-orange-600 mt-1">💎 Get 3 free likes and improve your position in leaderboard!</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Type Tabs and Refresh */}
-              <div className="flex flex-wrap justify-center items-center gap-2 md:gap-3 mb-6 md:mb-8">
-                <Button
-                  onClick={() => loadLeaderboard('daily')}
-                  variant={leaderboardType === 'daily' ? 'default' : 'outline'}
-                  className={leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white' : 'text-sm'}
-                  disabled={loadingLeaderboard}
-                >
-                  🔥 Daily
-                </Button>
-                <Button
-                  onClick={() => loadLeaderboard('weekly')}
-                  variant={leaderboardType === 'weekly' ? 'default' : 'outline'}
-                  className={leaderboardType === 'weekly' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' : 'text-sm'}
-                  disabled={loadingLeaderboard}
-                >
-                  ⭐ Weekly
-                </Button>
-                <Button
-                  onClick={() => loadLeaderboard('alltime')}
-                  variant={leaderboardType === 'alltime' ? 'default' : 'outline'}
-                  className={leaderboardType === 'alltime' ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white' : 'text-sm'}
-                  disabled={loadingLeaderboard}
-                >
-                  👑 All Time
-                </Button>
-                <Button
-                  onClick={() => loadLeaderboard(leaderboardType)}
-                  variant="outline"
-                  className="text-sm"
-                  disabled={loadingLeaderboard}
-                >
-                  🔄 Refresh
-                </Button>
-              </div>
-
-              {loadingLeaderboard ? (
-                <div className="text-center py-12">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
-                  <p className="text-gray-500 mt-4">Loading leaderboard...</p>
-                </div>
-              ) : leaderboardData.length === 0 ? (
-                <Card className="p-12">
-                  <div className="text-center text-gray-500">
-                    <Users className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-xl font-semibold">No data yet</p>
-                    <p className="text-sm mt-2">Be the first to get on the leaderboard!</p>
-                  </div>
-                </Card>
-              ) : (
-                <>
-                  {/* Achievement Progress Banner for Current User */}
-                  {(() => {
-                    const currentUserRankIndex = leaderboardData.findIndex(p => p.id === currentUser?.id)
-                    const currentUserRank = currentUserRankIndex >= 0 ? currentUserRankIndex + 1 : null
-                    const achievement = getAchievementProgress(currentUserRank, leaderboardData[0])
-                    
-                    return achievement && (
-                      <div className="mb-6 bg-gradient-to-r from-purple-100 via-pink-100 to-orange-100 border-2 border-purple-300 rounded-xl p-4 animate-pulse">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-sm md:text-base font-bold text-purple-800">{achievement.text}</p>
-                          <span className="text-sm font-semibold text-purple-600">Your Rank: #{currentUserRank}</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                          <div 
-                            className="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full transition-all duration-500"
-                            style={{ width: `${Math.min(achievement.progress, 100)}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )
-                  })()}
-                  
-                  <div className="space-y-4">
-                  {leaderboardData.map((profile, index) => {
-                    const rank = index + 1
-                    const badge = getBadge(profile, rank)
-                    const positionChange = getPositionChange(profile.id, rank)
-                    const likesCount = leaderboardType === 'daily' ? profile.daily_likes :
-                                     leaderboardType === 'weekly' ? profile.weekly_likes :
-                                     profile.total_likes
-
-                    return (
-                      <Card
-                        key={profile.id}
-                        className={`hover:shadow-xl transition-all ${
-                          rank === 1 ? 'border-4 border-yellow-400 shadow-yellow-200 shadow-lg' :
-                          rank === 2 ? 'border-3 border-gray-300' :
-                          rank === 3 ? 'border-3 border-orange-300' : ''
-                        }`}
-                      >
-                        <CardContent className="p-3 md:p-6">
-                          <div className="flex items-start md:items-center gap-2 md:gap-6">
-                            {/* Rank Badge with Position Change */}
-                            <div className="flex-shrink-0 flex flex-col items-center">
-                              <div className={`${
-                                rank === 1 ? 'text-3xl md:text-6xl' : rank === 2 ? 'text-2xl md:text-5xl' : rank === 3 ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'
-                              }`}>
-                                {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
-                              </div>
-                              {positionChange && (
-                                <div className={`flex items-center gap-0.5 text-xs md:text-sm ${positionChange.color} font-bold mt-1`}>
-                                  <span>{positionChange.emoji}</span>
-                                  <span>{positionChange.text}</span>
+                            {/* Info overlay with glassmorphism */}
+                            <div className="absolute bottom-0 left-0 right-0 p-6 text-white backdrop-blur-sm bg-gradient-to-t from-black/60 to-transparent">
+                              <h2 className="text-4xl font-black mb-2 drop-shadow-2xl tracking-tight">
+                                {profiles[currentProfileIndex].name}
+                                {profiles[currentProfileIndex].year && (
+                                  <span className="text-2xl ml-2 opacity-95 font-bold">, {profiles[currentProfileIndex].year}</span>
+                                )}
+                              </h2>
+                              {profiles[currentProfileIndex].department && (
+                                <div className="inline-block backdrop-blur-md bg-white/20 px-4 py-2 rounded-full border border-white/30">
+                                  <p className="text-base font-semibold drop-shadow-lg flex items-center gap-2">
+                                    <span className="text-xl">📚</span>
+                                    {profiles[currentProfileIndex].department}
+                                  </p>
                                 </div>
                               )}
-                              {positionChange?.label && (
-                                <Badge className="mt-1 text-[8px] md:text-xs bg-green-100 text-green-700 border-green-400 px-1 py-0">
-                                  {positionChange.label}
-                                </Badge>
-                              )}
                             </div>
 
-                            {/* Profile Photo */}
-                            <Avatar className={`flex-shrink-0 ${
-                              rank === 1 ? 'h-12 w-12 md:h-24 md:w-24 border-2 md:border-4 border-yellow-400' :
-                              rank === 2 ? 'h-11 w-11 md:h-20 md:w-20 border-2 md:border-3 border-gray-400' :
-                              rank === 3 ? 'h-11 w-11 md:h-20 md:w-20 border-2 md:border-3 border-orange-400' :
-                              'h-10 w-10 md:h-16 md:w-16 border-2 border-gray-200'
-                            }`}>
-                              <AvatarImage src={profile.photo_url} />
-                              <AvatarFallback className="text-sm md:text-2xl bg-gradient-to-br from-pink-400 to-purple-600 text-white">
-                                {profile.name?.charAt(0) || 'U'}
-                              </AvatarFallback>
-                            </Avatar>
-
-                            {/* Profile Info */}
-                            <div className="flex-1 min-w-0">
-                              {/* Name and Badge - Enhanced badges */}
-                              <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                                <h3 className={`font-bold ${
-                                  rank === 1 ? 'text-sm md:text-2xl' : rank === 2 || rank === 3 ? 'text-sm md:text-xl' : 'text-xs md:text-lg'
-                                } text-gray-900`}>
-                                  {profile.name}
-                                </h3>
-                                {badge && (
-                                  <Badge className={`hidden md:inline-flex ${badge.color} border-2 text-xs px-2 py-0.5 font-bold`}>
-                                    {badge.emoji} {badge.text}
-                                  </Badge>
-                                )}
-                              </div>
-
-                              {/* Department and Year */}
-                              <p className="text-[10px] md:text-sm text-gray-600 mb-1">
-                                {profile.department} • {profile.year} Year
-                              </p>
-
-                              {/* Bio */}
-                              {profile.bio && (
-                                <p className="text-gray-500 italic line-clamp-1 text-[10px] md:text-sm mb-2 md:mb-0">
-                                  {profile.bio}
-                                </p>
-                              )}
-
-                              {/* Mobile Layout - Badge, Stats and View Button Below */}
-                              <div className="md:hidden mt-2 space-y-1.5">
-                                {/* Badge on Mobile - Enhanced */}
-                                {badge && (
-                                  <Badge className={`${badge.color} border-2 text-[9px] px-2 py-0.5 inline-flex font-bold`}>
-                                    {badge.emoji} {badge.text}
-                                  </Badge>
-                                )}
-                                
-                                {/* Stats and View Button */}
-                                <div className="flex items-center gap-3">
-                                  <div className="flex items-center gap-1">
-                                    <span className={`${
-                                      rank === 1 ? 'text-xl' : rank === 2 || rank === 3 ? 'text-lg' : 'text-base'
-                                    } font-bold text-pink-500`}>
-                                      ❤️ {likesCount}
-                                    </span>
-                                    <span className="text-[10px] text-gray-500">
-                                      {leaderboardType === 'daily' ? 'likes today' :
-                                       leaderboardType === 'weekly' ? 'this week' :
-                                       'total likes'}
-                                    </span>
-                                  </div>
-
-                                  <Button
-                                    onClick={() => openProfileView(profile)}
-                                    className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-xs px-3 py-1.5 h-auto"
-                                  >
-                                    View
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Stats - Right Side on Desktop Only */}
-                            <div className="hidden md:block text-right flex-shrink-0">
-                              <div className={`${
-                                rank === 1 ? 'text-3xl' : rank === 2 || rank === 3 ? 'text-2xl' : 'text-xl'
-                              } font-bold text-pink-500 mb-1`}>
-                                ❤️ {likesCount}
-                              </div>
-                              <p className="text-xs text-gray-500 whitespace-nowrap">
-                                {leaderboardType === 'daily' ? 'likes today' :
-                                 leaderboardType === 'weekly' ? 'this week' :
-                                 'total likes'}
-                              </p>
-                              {profile.profile_views > 0 && (
-                                <p className="text-xs text-gray-400 mt-1">
-                                  👁️ {profile.profile_views}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* View Profile Button - Right Side on Desktop Only */}
-                            <Button
-                              onClick={() => openProfileView(profile)}
-                              className="hidden md:block bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-sm px-4 py-2 h-auto flex-shrink-0"
-                            >
-                              View
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-                </>
-              )}
-
-              {/* Motivational Message */}
-              <div className="mt-12 text-center p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl">
-                <p className="text-lg font-semibold text-gray-700 mb-2">
-                  Want to be on the leaderboard? 🚀
-                </p>
-                <p className="text-sm text-gray-600">
-                  Complete your profile, add a great photo, write an interesting bio, and be active!
-                </p>
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* Search Tab */}
-          <TabsContent value="search">
-            <div className="max-w-4xl mx-auto">
-              <div className="text-center mb-8">
-                <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 mb-2">
-                  Search Students
-                </h2>
-                <p className="text-gray-600">Find students by name, email, or department</p>
-              </div>
-
-              {/* Search Bar */}
-              <div className="mb-8">
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                    <Input
-                      type="text"
-                      placeholder="Search by name, email, or department..."
-                      value={searchQuery}
-                      onChange={(e) => {
-                        setSearchQuery(e.target.value)
-                      }}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter') {
-                          handleSearch()
-                        }
-                      }}
-                      className="pl-12 h-14 text-lg border-2 focus:border-purple-500"
-                    />
-                  </div>
-                  <Button
-                    onClick={handleSearch}
-                    disabled={isSearching || !searchQuery.trim()}
-                    className="h-14 px-8 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
-                  >
-                    {isSearching ? 'Searching...' : 'Search'}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Search Results */}
-              <div>
-                {/* Loading State */}
-                {isSearching && (
-                  <Card className="p-12">
-                    <div className="text-center text-gray-500">
-                      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
-                      <p className="text-xl">Searching...</p>
-                      <p className="text-sm mt-2">Looking for "{searchQuery}"</p>
-                    </div>
-                  </Card>
-                )}
-
-                {/* No Results */}
-                {!isSearching && searchQuery && searchResults.length === 0 && (
-                  <Card className="p-12">
-                    <div className="text-center text-gray-500">
-                      <Search className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                      <p className="text-xl font-semibold">No users found</p>
-                      <p className="text-sm mt-2">No one matches "{searchQuery}"</p>
-                      <p className="text-xs text-gray-400 mt-2">Try searching with different keywords like name, email, or department</p>
-                    </div>
-                  </Card>
-                )}
-
-                {/* Empty State - Before Search */}
-                {!isSearching && !searchQuery && (
-                  <Card className="p-12">
-                    <div className="text-center text-gray-500">
-                      <Search className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                      <p className="text-xl font-semibold">Start searching</p>
-                      <p className="text-sm mt-2">Enter a name, email, or department to find students</p>
-                      <div className="mt-4 text-xs text-gray-400">
-                        <p>💡 Try searching for:</p>
-                        <p>• Student name (e.g., "John", "Sarah")</p>
-                        <p>• Email ID (e.g., "23eg105")</p>
-                        <p>• Department (e.g., "CSE", "ECE")</p>
-                      </div>
-                    </div>
-                  </Card>
-                )}
-
-                {/* Search Results */}
-                {!isSearching && searchResults.length > 0 && (
-                  <div className="space-y-4">
-                    <p className="text-gray-600 mb-4">Found {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}</p>
-                    {searchResults.map((profile) => (
-                      <Card 
-                        key={profile.id} 
-                        className="hover:shadow-xl transition-all cursor-pointer hover:scale-[1.01]"
-                        onClick={() => {
-                          setSelectedProfile(profile)
-                          setShowProfileModal(true)
-                        }}
-                      >
-                        <CardContent className="p-4 md:p-6">
-                          {/* Desktop Layout - Side by side */}
-                          <div className="hidden md:flex items-start gap-6">
-                            {/* Profile Photo */}
-                            <div className="relative">
-                              <Avatar className="h-24 w-24 border-4 border-purple-200 group-hover:border-purple-400 transition-all">
-                                <AvatarImage src={profile.photo_url} />
-                                <AvatarFallback className="text-2xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
-                                  {profile.name?.charAt(0) || 'U'}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 shadow-lg">
-                                <Eye className="h-4 w-4 text-purple-600" />
-                              </div>
-                            </div>
-
-                            {/* Profile Info */}
-                            <div className="flex-1">
-                              <h3 className="text-2xl font-bold mb-2 text-purple-900">{profile.name}</h3>
-                              <div className="space-y-2 text-sm text-gray-600">
-                                <p className="flex items-center gap-2">
-                                  <Mail className="h-4 w-4" />
-                                  {profile.email}
-                                </p>
-                                <p className="flex items-center gap-2">
-                                  <User className="h-4 w-4" />
-                                  {profile.department} • {profile.year} Year
-                                </p>
-                                {profile.bio && (
-                                  <p className="text-gray-700 mt-3 line-clamp-2">{profile.bio}</p>
-                                )}
-                                {profile.interests && profile.interests.length > 0 && (
-                                  <div className="flex flex-wrap gap-2 mt-3">
-                                    {profile.interests.slice(0, 3).map((interest, index) => (
-                                      <Badge key={index} variant="secondary" className="bg-purple-100 text-purple-700">
-                                        {interest}
-                                      </Badge>
-                                    ))}
-                                    {profile.interests.length > 3 && (
-                                      <Badge variant="secondary" className="bg-gray-100 text-gray-600">
-                                        +{profile.interests.length - 3} more
-                                      </Badge>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Action Buttons - Desktop */}
-                            <div className="flex flex-col gap-2">
+                            {/* Unlike button or Send Request button */}
+                            {likedProfiles.has(profiles[currentProfileIndex].id) ? (
                               <Button
+                                className="absolute top-6 right-6 backdrop-blur-xl bg-red-500/90 hover:bg-red-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  setSelectedProfile(profile)
-                                  setShowProfileModal(true)
+                                  handleUnlike(profiles[currentProfileIndex].id)
                                 }}
-                                variant="outline"
-                                className="border-2 border-purple-300 hover:bg-purple-50"
                               >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View
+                                <HeartCrack className="h-4 w-4 mr-2" />
+                                Unlike
                               </Button>
-                              {!likedProfiles.has(profile.id) ? (
-                                <Button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleLike(profile.id)
-                                  }}
-                                  className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                                >
-                                  <Heart className="h-4 w-4 mr-2" />
-                                  Like
-                                </Button>
-                              ) : (
-                                <Button 
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleUnlike(profile.id)
-                                  }}
-                                  variant="outline" 
-                                  className="border-2 border-red-300 hover:bg-red-50 text-red-600"
-                                >
-                                  <HeartCrack className="h-4 w-4 mr-2" />
-                                  Unlike
-                                </Button>
-                              )}
-                            </div>
+                            ) : (
+                              <Button
+                                className="absolute top-6 right-6 backdrop-blur-xl bg-pink-500/90 hover:bg-pink-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-2xl border-2 border-white/50"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  sendFriendRequest(profiles[currentProfileIndex].id)
+                                }}
+                              >
+                                <Heart className="h-4 w-4 mr-2" />
+                                Send Request
+                              </Button>
+                            )}
                           </div>
 
-                          {/* Mobile Layout - Stacked */}
-                          <div className="md:hidden space-y-4">
-                            {/* Profile Photo and Name */}
-                            <div className="flex items-start gap-4">
-                              <div className="relative">
-                                <Avatar className="h-16 w-16 border-4 border-purple-200">
-                                  <AvatarImage src={profile.photo_url} />
-                                  <AvatarFallback className="text-xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
-                                    {profile.name?.charAt(0) || 'U'}
-                                  </AvatarFallback>
-                                </Avatar>
-                              </div>
-                              <div className="flex-1">
-                                <h3 className="text-xl font-bold text-purple-900">{profile.name}</h3>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  {profile.department} • {profile.year} Year
+                          {/* Quick Info Section with gradient background */}
+                          <CardContent
+                            className="p-6 bg-gradient-to-br from-white via-pink-50/30 to-purple-50/30 backdrop-blur-sm cursor-pointer"
+                            onClick={() => openProfileView(profiles[currentProfileIndex])}
+                          >
+                            {/* Bio Preview */}
+                            {profiles[currentProfileIndex].bio && (
+                              <div className="mb-4 p-4 backdrop-blur-sm bg-white/60 rounded-2xl border border-white/50 shadow-md">
+                                <p className="text-gray-800 text-sm line-clamp-3 leading-relaxed font-medium">
+                                  💭 {profiles[currentProfileIndex].bio}
                                 </p>
                               </div>
-                            </div>
-
-                            {/* Email */}
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <Mail className="h-4 w-4 flex-shrink-0" />
-                              <span className="truncate">{profile.email}</span>
-                            </div>
-
-                            {/* Bio */}
-                            {profile.bio && (
-                              <p className="text-sm text-gray-700 leading-relaxed line-clamp-3">{profile.bio}</p>
                             )}
 
-                            {/* Interests */}
-                            {profile.interests && profile.interests.length > 0 && (
+                            {/* Interests Preview with modern pills */}
+                            {profiles[currentProfileIndex].interests && profiles[currentProfileIndex].interests.length > 0 && (
                               <div className="flex flex-wrap gap-2">
-                                {profile.interests.slice(0, 4).map((interest, index) => (
-                                  <Badge key={index} variant="secondary" className="bg-purple-100 text-purple-700 text-xs">
+                                {profiles[currentProfileIndex].interests.slice(0, 4).map((interest, idx) => (
+                                  <Badge
+                                    key={idx}
+                                    className="text-xs px-4 py-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white font-semibold rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105 border-2 border-white/50"
+                                  >
                                     {interest}
                                   </Badge>
                                 ))}
-                                {profile.interests.length > 4 && (
-                                  <Badge variant="secondary" className="bg-gray-100 text-gray-600 text-xs">
-                                    +{profile.interests.length - 4}
+                                {profiles[currentProfileIndex].interests.length > 4 && (
+                                  <Badge className="text-xs px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold rounded-full shadow-lg border-2 border-white/50">
+                                    +{profiles[currentProfileIndex].interests.length - 4} more
                                   </Badge>
                                 )}
                               </div>
                             )}
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
 
-                            {/* Action Buttons - Mobile (Full Width Below Profile) */}
-                            <div className="flex gap-2 pt-2 border-t">
-                              <Button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setSelectedProfile(profile)
-                                  setShowProfileModal(true)
-                                }}
-                                variant="outline"
-                                className="flex-1 border-2 border-purple-300 hover:bg-purple-50"
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View
-                              </Button>
-                              {!likedProfiles.has(profile.id) ? (
-                                <Button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleLike(profile.id)
-                                  }}
-                                  className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
-                                >
-                                  <Heart className="h-4 w-4 mr-2" />
-                                  Like
-                                </Button>
-                              ) : (
-                                <Button 
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleUnlike(profile.id)
-                                  }}
-                                  variant="outline" 
-                                  className="flex-1 border-2 border-red-300 hover:bg-red-50 text-red-600"
-                                >
-                                  <HeartCrack className="h-4 w-4 mr-2" />
-                                  Unlike
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                    {/* Action Buttons with modern design */}
+                    <div className="flex justify-center items-center gap-6 mb-4">
+                      {/* Pass Button */}
+                      <button
+                        onClick={handleSwipeLeft}
+                        className="relative w-20 h-20 rounded-full bg-gradient-to-br from-red-400 to-red-600 shadow-2xl hover:shadow-red-500/50 transition-all border-4 border-white hover:scale-110 active:scale-95 flex items-center justify-center group overflow-hidden"
+                        aria-label="Pass"
+                      >
+                        <div className="absolute inset-0 bg-white/20 group-hover:bg-white/30 transition-all"></div>
+                        <X className="h-10 w-10 text-white relative z-10" strokeWidth={3} />
+                        <div className="absolute inset-0 bg-red-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
+                      </button>
+
+                      {/* Like Button */}
+                      <button
+                        onClick={handleSwipeRight}
+                        disabled={likedProfiles.has(profiles[currentProfileIndex]?.id)}
+                        className={`relative w-20 h-20 rounded-full shadow-2xl transition-all border-4 border-white active:scale-95 flex items-center justify-center group overflow-hidden ${likedProfiles.has(profiles[currentProfileIndex]?.id)
+                          ? 'bg-gradient-to-br from-gray-300 to-gray-400 cursor-not-allowed opacity-60'
+                          : 'bg-gradient-to-br from-green-400 to-green-600 hover:shadow-green-500/50 hover:scale-110'
+                          }`}
+                        aria-label="Like"
+                      >
+                        <div className={`absolute inset-0 ${likedProfiles.has(profiles[currentProfileIndex]?.id) ? '' : 'bg-white/20 group-hover:bg-white/30'} transition-all`}></div>
+                        <Heart className={`h-10 w-10 relative z-10 ${likedProfiles.has(profiles[currentProfileIndex]?.id)
+                          ? 'text-white fill-white'
+                          : 'text-white fill-white'
+                          }`} strokeWidth={3} />
+                        {!likedProfiles.has(profiles[currentProfileIndex]?.id) && (
+                          <div className="absolute inset-0 bg-green-400/50 blur-xl group-hover:blur-2xl transition-all"></div>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Keyboard shortcuts hint with modern style */}
+                    <div className="text-center mt-6">
+                      <div className="inline-block backdrop-blur-md bg-white/70 px-6 py-3 rounded-full border border-white/50 shadow-lg">
+                        <p className="text-xs text-gray-700 font-semibold flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-purple-500" />
+                          Use ← → arrow keys or swipe on mobile
+                          <Sparkles className="h-4 w-4 text-pink-500" />
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-          </TabsContent>
 
-          {/* Friends Tab */}
-          <TabsContent value="matches">
-            <div className="max-w-6xl mx-auto">
-              {/* Mobile Full-Page Chat View */}
-              {isMobileChatOpen && selectedMatch ? (
-                <div className="fixed inset-0 bg-white z-50 flex flex-col md:hidden">
-                  {/* Chat Header */}
-                  <div className="bg-gradient-to-r from-pink-500 to-purple-500 text-white p-4 shadow-lg">
-                    <div className="flex items-center gap-3">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setIsMobileChatOpen(false)
-                          setSelectedMatch(null)
-                        }}
-                        className="text-white hover:bg-white/20 p-2"
-                      >
-                        <X className="h-6 w-6" />
-                      </Button>
-                      <div className="relative">
-                        <Avatar className="h-10 w-10 border-2 border-white">
-                          <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
-                          <AvatarFallback>{selectedMatch.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
-                        </Avatar>
-                        {onlineUsers.has(selectedMatch.matchedUser?.id) && (
-                          <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></span>
+              {/* Full Profile Modal */}
+              {showProfileModal && selectedProfile && (
+                <div
+                  className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+                  onClick={closeProfileView}
+                >
+                  <div
+                    className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Header with photo */}
+                    <div className="relative h-80 bg-gradient-to-br from-pink-200 to-purple-200">
+                      {selectedProfile.photo_url ? (
+                        <img
+                          src={selectedProfile.photo_url}
+                          alt={selectedProfile.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center h-full">
+                          <User className="h-32 w-32 text-gray-400" />
+                        </div>
+                      )}
+
+                      {/* Gradient overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent"></div>
+
+                      {/* Name overlay */}
+                      <div className="absolute bottom-6 left-6 right-6 text-white">
+                        <h1 className="text-4xl font-bold mb-2 drop-shadow-lg">
+                          {selectedProfile.name}
+                        </h1>
+                        {selectedProfile.department && selectedProfile.year && (
+                          <p className="text-lg opacity-95 drop-shadow-md">
+                            📚 {selectedProfile.department} • {selectedProfile.year} Year
+                          </p>
                         )}
                       </div>
-                      <div className="flex-1">
-                        <h3 className="font-bold text-lg">{selectedMatch.matchedUser?.name}</h3>
-                        <p className="text-xs text-white/90">
-                          {onlineUsers.has(selectedMatch.matchedUser?.id) ? (
-                            <span className="flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse"></span>
-                              Active now
-                            </span>
-                          ) : (
-                            `${selectedMatch.matchedUser?.department} • ${selectedMatch.matchedUser?.year} Year`
-                          )}
-                        </p>
-                      </div>
-                      {/* Options Menu */}
-                      <div className="flex items-center gap-1">
-                        {!selectedMatch.isBlocked && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => {
-                              if (confirm(`Remove ${selectedMatch.matchedUser?.name} from friends?`)) {
-                                removeFriend(selectedMatch.matchedUser?.id)
-                                setIsMobileChatOpen(false)
-                              }
-                            }}
-                            className="text-white hover:bg-white/20 p-2"
-                            title="Remove Friend"
-                          >
-                            <UserMinus className="h-5 w-5" />
-                          </Button>
-                        )}
-                        
-                        {selectedMatch.isBlocked && selectedMatch.blockedBy === 'me' ? (
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={async () => {
-                              if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
-                                try {
-                                  const response = await fetch('/api/unblock-user', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                      blockerId: currentUser.id,
-                                      blockedId: selectedMatch.matchedUser?.id
-                                    })
-                                  })
-                                  if (response.ok) {
-                                    toast.success('User unblocked!')
-                                    setBlockedUsers(prev => {
-                                      const newSet = new Set(prev)
-                                      newSet.delete(selectedMatch.matchedUser?.id)
-                                      return newSet
-                                    })
-                                    setBlockedUsersList(prev => prev.filter(u => u.id !== selectedMatch.matchedUser?.id))
-                                    loadMatches(currentUser.id)
-                                  } else {
-                                    toast.error('Failed to unblock')
-                                  }
-                                } catch (error) {
-                                  toast.error('Error unblocking')
-                                }
-                              }
-                            }}
-                            className="text-white hover:bg-white/20 p-2"
-                            title="Unblock"
-                          >
-                            <UserPlus className="h-5 w-5" />
-                          </Button>
-                        ) : !selectedMatch.isBlocked && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => {
-                              if (confirm(`Block ${selectedMatch.matchedUser?.name}?`)) {
-                                blockUser(selectedMatch.matchedUser?.id)
-                              }
-                            }}
-                            className="text-white hover:bg-white/20 p-2"
-                            title="Block"
-                          >
-                            <UserX className="h-5 w-5" />
-                          </Button>
-                        )}
-                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-6 space-y-6">
+                      {/* Bio */}
+                      {selectedProfile.bio && (
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                            <span className="text-2xl">💭</span>
+                            About
+                          </h3>
+                          <p className="text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
+                        </div>
+                      )}
+
+                      {/* Interests */}
+                      {selectedProfile.interests && selectedProfile.interests.length > 0 && (
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                            <span className="text-2xl">🎯</span>
+                            Interests
+                          </h3>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedProfile.interests.map((interest, idx) => (
+                              <Badge
+                                key={idx}
+                                variant="secondary"
+                                className="text-sm px-4 py-2"
+                              >
+                                {interest}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Email */}
+                      {selectedProfile.email && (
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                            <span className="text-2xl">📧</span>
+                            Contact
+                          </h3>
+                          <div className="flex items-center gap-2 text-gray-700">
+                            <Mail className="h-5 w-5" />
+                            <span>{selectedProfile.email}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Social Media Links */}
+                      {(selectedProfile.instagram || selectedProfile.github || selectedProfile.linkedin) && (
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                            <span className="text-2xl">🔗</span>
+                            Connect
+                          </h3>
+                          <div className="flex flex-wrap gap-3">
+                            {selectedProfile.instagram && (
+                              <a
+                                href={selectedProfile.instagram.startsWith('http') ? selectedProfile.instagram : `https://instagram.com/${selectedProfile.instagram.replace('@', '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all shadow-md hover:shadow-lg"
+                              >
+                                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+                                </svg>
+                                Instagram
+                              </a>
+                            )}
+                            {selectedProfile.github && (
+                              <a
+                                href={selectedProfile.github.startsWith('http') ? selectedProfile.github : `https://github.com/${selectedProfile.github}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all shadow-md hover:shadow-lg"
+                              >
+                                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                                </svg>
+                                GitHub
+                              </a>
+                            )}
+                            {selectedProfile.linkedin && (
+                              <a
+                                href={selectedProfile.linkedin.startsWith('http') ? selectedProfile.linkedin : `https://linkedin.com/in/${selectedProfile.linkedin}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md hover:shadow-lg"
+                              >
+                                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+                                </svg>
+                                LinkedIn
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
+                </div>
+              )}
+            </TabsContent>
 
-                  {/* Chat Messages Area */}
-                  {selectedMatch.isBlocked ? (
-                    <div className="flex-1 flex items-center justify-center p-6 bg-gray-50">
-                      <div className="text-center max-w-sm">
-                        <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
-                        <h3 className="text-2xl font-bold text-gray-800 mb-2">
-                          Can't Chat
-                        </h3>
-                        <p className="text-gray-600">
-                          {selectedMatch.blockedBy === 'them' ? (
-                            <>This user has blocked you.</>
-                          ) : (
-                            <>You have blocked this user.</>
-                          )}
-                        </p>
-                        {selectedMatch.blockedBy === 'me' && (
-                          <Button
-                            onClick={async () => {
-                              if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
-                                try {
-                                  const response = await fetch('/api/unblock-user', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                      blockerId: currentUser.id,
-                                      blockedId: selectedMatch.matchedUser?.id
-                                    })
-                                  })
-                                  if (response.ok) {
-                                    toast.success('Unblocked!')
-                                    setBlockedUsers(prev => {
-                                      const newSet = new Set(prev)
-                                      newSet.delete(selectedMatch.matchedUser?.id)
-                                      return newSet
-                                    })
-                                    setBlockedUsersList(prev => prev.filter(u => u.id !== selectedMatch.matchedUser?.id))
-                                    loadMatches(currentUser.id)
-                                  }
-                                } catch (error) {
-                                  toast.error('Error')
-                                }
-                              }
-                            }}
-                            className="mt-4 bg-purple-500 hover:bg-purple-600"
-                          >
-                            Unblock User
-                          </Button>
-                        )}
-                      </div>
+            {/* Leaderboard Tab */}
+            <TabsContent value="leaderboard">
+              <div className="max-w-4xl mx-auto px-3 md:px-4">
+                <div className="text-center mb-6 md:mb-8">
+                  <h2 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 mb-2">
+                    🏆 Leaderboard
+                  </h2>
+                  <p className="text-sm md:text-base text-gray-600">Most liked profiles on Anurag Connect</p>
+
+                  {/* Countdown Timer */}
+                  {(leaderboardType === 'daily' || leaderboardType === 'weekly') && (
+                    <div className="mt-4 inline-block bg-gradient-to-r from-orange-100 to-red-100 px-4 py-2 rounded-full border-2 border-orange-300">
+                      <p className="text-sm md:text-base font-bold text-orange-700">
+                        ⏰ {leaderboardType === 'daily' ? 'Daily' : 'Weekly'} reset in {countdown.hours}h {countdown.minutes}m {countdown.seconds}s
+                      </p>
+                      <p className="text-xs text-orange-600 mt-1">💎 Get 3 free likes and improve your position in leaderboard!</p>
                     </div>
-                  ) : (
-                    <>
-                      <div id="mobile-chat-messages" className="flex-1 overflow-y-auto p-4 bg-gray-50 scroll-smooth">
-                        <div className="space-y-4">
-                          {messages.length === 0 ? (
-                            <div className="text-center text-gray-500 py-12">
-                              <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                              <p className="text-lg">No messages yet</p>
-                              <p className="text-sm mt-1">Say hi! 👋</p>
-                            </div>
-                          ) : (
-                            messages.map((msg, index) => {
-                              const isCurrentUser = msg.senderId === currentUser.id
-                              const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId
-                              const showDateSeparator = shouldShowDateSeparator(msg, messages[index - 1])
-                              
-                              return (
-                                <div key={msg.id}>
-                                  {/* Date Separator */}
-                                  {showDateSeparator && (
-                                    <div className="flex items-center justify-center my-4">
-                                      <div className="bg-white shadow-sm text-gray-600 text-xs font-medium px-4 py-1.5 rounded-full border border-gray-200">
-                                        {formatMessageDate(msg.createdAt)}
-                                      </div>
+                  )}
+                </div>
+
+                {/* Type Tabs and Refresh */}
+                <div className="flex flex-wrap justify-center items-center gap-2 md:gap-3 mb-6 md:mb-8">
+                  <Button
+                    onClick={() => loadLeaderboard('daily')}
+                    variant={leaderboardType === 'daily' ? 'default' : 'outline'}
+                    className={leaderboardType === 'daily' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white' : 'text-sm'}
+                    disabled={loadingLeaderboard}
+                  >
+                    🔥 Daily
+                  </Button>
+                  <Button
+                    onClick={() => loadLeaderboard('weekly')}
+                    variant={leaderboardType === 'weekly' ? 'default' : 'outline'}
+                    className={leaderboardType === 'weekly' ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' : 'text-sm'}
+                    disabled={loadingLeaderboard}
+                  >
+                    ⭐ Weekly
+                  </Button>
+                  <Button
+                    onClick={() => loadLeaderboard('alltime')}
+                    variant={leaderboardType === 'alltime' ? 'default' : 'outline'}
+                    className={leaderboardType === 'alltime' ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white' : 'text-sm'}
+                    disabled={loadingLeaderboard}
+                  >
+                    👑 All Time
+                  </Button>
+                  <Button
+                    onClick={() => loadLeaderboard(leaderboardType)}
+                    variant="outline"
+                    className="text-sm"
+                    disabled={loadingLeaderboard}
+                  >
+                    🔄 Refresh
+                  </Button>
+                </div>
+
+                {loadingLeaderboard ? (
+                  <div className="text-center py-12">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
+                    <p className="text-gray-500 mt-4">Loading leaderboard...</p>
+                  </div>
+                ) : leaderboardData.length === 0 ? (
+                  <Card className="p-12">
+                    <div className="text-center text-gray-500">
+                      <Users className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-xl font-semibold">No data yet</p>
+                      <p className="text-sm mt-2">Be the first to get on the leaderboard!</p>
+                    </div>
+                  </Card>
+                ) : (
+                  <>
+                    {/* Achievement Progress Banner for Current User */}
+                    {(() => {
+                      const currentUserRankIndex = leaderboardData.findIndex(p => p.id === currentUser?.id)
+                      const currentUserRank = currentUserRankIndex >= 0 ? currentUserRankIndex + 1 : null
+                      const achievement = getAchievementProgress(currentUserRank, leaderboardData[0])
+
+                      return achievement && (
+                        <div className="mb-6 bg-gradient-to-r from-purple-100 via-pink-100 to-orange-100 border-2 border-purple-300 rounded-xl p-4 animate-pulse">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-sm md:text-base font-bold text-purple-800">{achievement.text}</p>
+                            <span className="text-sm font-semibold text-purple-600">Your Rank: #{currentUserRank}</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                            <div
+                              className="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full transition-all duration-500"
+                              style={{ width: `${Math.min(achievement.progress, 100)}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    <div className="space-y-4">
+                      {leaderboardData.map((profile, index) => {
+                        const rank = index + 1
+                        const badge = getBadge(profile, rank)
+                        const positionChange = getPositionChange(profile.id, rank)
+                        const likesCount = leaderboardType === 'daily' ? profile.daily_likes :
+                          leaderboardType === 'weekly' ? profile.weekly_likes :
+                            profile.total_likes
+
+                        return (
+                          <Card
+                            key={profile.id}
+                            className={`hover:shadow-xl transition-all ${rank === 1 ? 'border-4 border-yellow-400 shadow-yellow-200 shadow-lg' :
+                              rank === 2 ? 'border-3 border-gray-300' :
+                                rank === 3 ? 'border-3 border-orange-300' : ''
+                              }`}
+                          >
+                            <CardContent className="p-3 md:p-6">
+                              <div className="flex items-start md:items-center gap-2 md:gap-6">
+                                {/* Rank Badge with Position Change */}
+                                <div className="flex-shrink-0 flex flex-col items-center">
+                                  <div className={`${rank === 1 ? 'text-3xl md:text-6xl' : rank === 2 ? 'text-2xl md:text-5xl' : rank === 3 ? 'text-2xl md:text-4xl' : 'text-xl md:text-3xl'
+                                    }`}>
+                                    {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`}
+                                  </div>
+                                  {positionChange && (
+                                    <div className={`flex items-center gap-0.5 text-xs md:text-sm ${positionChange.color} font-bold mt-1`}>
+                                      <span>{positionChange.emoji}</span>
+                                      <span>{positionChange.text}</span>
                                     </div>
                                   )}
-                                  
-                                  {/* Message */}
-                                  <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`flex items-end gap-2 max-w-[85%] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                                      {showAvatar && !isCurrentUser && (
-                                        <Avatar className="h-8 w-8 flex-shrink-0">
-                                          <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
-                                          <AvatarFallback className="text-xs">
-                                            {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                      )}
-                                      {showAvatar && isCurrentUser && (
-                                        <Avatar className="h-8 w-8 flex-shrink-0">
-                                          <AvatarImage src={currentUser?.photo_url} />
-                                          <AvatarFallback className="text-xs">
-                                            {currentUser?.name?.charAt(0) || 'U'}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                      )}
-                                      {!showAvatar && <div className="w-8 flex-shrink-0"></div>}
-                                    
-                                    <div 
-                                      className={`rounded-2xl px-4 py-2.5 ${
-                                        isCurrentUser 
-                                          ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white' 
-                                          : 'bg-white text-gray-900 shadow-sm'
-                                      }`}
-                                    >
-                                      <p className="break-words text-sm leading-relaxed">{msg.message}</p>
-                                      <p className={`text-xs mt-1 ${
-                                        isCurrentUser ? 'text-pink-100' : 'text-gray-400'
-                                      }`}>
-                                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                      </p>
-                                    </div>
+                                  {positionChange?.label && (
+                                    <Badge className="mt-1 text-[8px] md:text-xs bg-green-100 text-green-700 border-green-400 px-1 py-0">
+                                      {positionChange.label}
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                {/* Profile Photo */}
+                                <Avatar className={`flex-shrink-0 ${rank === 1 ? 'h-12 w-12 md:h-24 md:w-24 border-2 md:border-4 border-yellow-400' :
+                                  rank === 2 ? 'h-11 w-11 md:h-20 md:w-20 border-2 md:border-3 border-gray-400' :
+                                    rank === 3 ? 'h-11 w-11 md:h-20 md:w-20 border-2 md:border-3 border-orange-400' :
+                                      'h-10 w-10 md:h-16 md:w-16 border-2 border-gray-200'
+                                  }`}>
+                                  <AvatarImage src={profile.photo_url} />
+                                  <AvatarFallback className="text-sm md:text-2xl bg-gradient-to-br from-pink-400 to-purple-600 text-white">
+                                    {profile.name?.charAt(0) || 'U'}
+                                  </AvatarFallback>
+                                </Avatar>
+
+                                {/* Profile Info */}
+                                <div className="flex-1 min-w-0">
+                                  {/* Name and Badge - Enhanced badges */}
+                                  <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                                    <h3 className={`font-bold ${rank === 1 ? 'text-sm md:text-2xl' : rank === 2 || rank === 3 ? 'text-sm md:text-xl' : 'text-xs md:text-lg'
+                                      } text-gray-900`}>
+                                      {profile.name}
+                                    </h3>
+                                    {badge && (
+                                      <Badge className={`hidden md:inline-flex ${badge.color} border-2 text-xs px-2 py-0.5 font-bold`}>
+                                        {badge.emoji} {badge.text}
+                                      </Badge>
+                                    )}
+                                  </div>
+
+                                  {/* Department and Year */}
+                                  <p className="text-[10px] md:text-sm text-gray-600 mb-1">
+                                    {profile.department} • {profile.year} Year
+                                  </p>
+
+                                  {/* Bio */}
+                                  {profile.bio && (
+                                    <p className="text-gray-500 italic line-clamp-1 text-[10px] md:text-sm mb-2 md:mb-0">
+                                      {profile.bio}
+                                    </p>
+                                  )}
+
+                                  {/* Mobile Layout - Badge, Stats and View Button Below */}
+                                  <div className="md:hidden mt-2 space-y-1.5">
+                                    {/* Badge on Mobile - Enhanced */}
+                                    {badge && (
+                                      <Badge className={`${badge.color} border-2 text-[9px] px-2 py-0.5 inline-flex font-bold`}>
+                                        {badge.emoji} {badge.text}
+                                      </Badge>
+                                    )}
+
+                                    {/* Stats and View Button */}
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex items-center gap-1">
+                                        <span className={`${rank === 1 ? 'text-xl' : rank === 2 || rank === 3 ? 'text-lg' : 'text-base'
+                                          } font-bold text-pink-500`}>
+                                          ❤️ {likesCount}
+                                        </span>
+                                        <span className="text-[10px] text-gray-500">
+                                          {leaderboardType === 'daily' ? 'likes today' :
+                                            leaderboardType === 'weekly' ? 'this week' :
+                                              'total likes'}
+                                        </span>
+                                      </div>
+
+                                      <Button
+                                        onClick={() => openProfileView(profile)}
+                                        className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-xs px-3 py-1.5 h-auto"
+                                      >
+                                        View
+                                      </Button>
                                     </div>
                                   </div>
                                 </div>
-                              )
-                            })
-                          )}
-                          {isTyping && (
-                            <div className="flex justify-start">
-                              <div className="bg-white rounded-2xl px-4 py-3 shadow-sm">
-                                <div className="flex gap-1">
-                                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
-                                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+
+                                {/* Stats - Right Side on Desktop Only */}
+                                <div className="hidden md:block text-right flex-shrink-0">
+                                  <div className={`${rank === 1 ? 'text-3xl' : rank === 2 || rank === 3 ? 'text-2xl' : 'text-xl'
+                                    } font-bold text-pink-500 mb-1`}>
+                                    ❤️ {likesCount}
+                                  </div>
+                                  <p className="text-xs text-gray-500 whitespace-nowrap">
+                                    {leaderboardType === 'daily' ? 'likes today' :
+                                      leaderboardType === 'weekly' ? 'this week' :
+                                        'total likes'}
+                                  </p>
+                                  {profile.profile_views > 0 && (
+                                    <p className="text-xs text-gray-400 mt-1">
+                                      👁️ {profile.profile_views}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* View Profile Button - Right Side on Desktop Only */}
+                                <Button
+                                  onClick={() => openProfileView(profile)}
+                                  className="hidden md:block bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-sm px-4 py-2 h-auto flex-shrink-0"
+                                >
+                                  View
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {/* Motivational Message */}
+                <div className="mt-12 text-center p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl">
+                  <p className="text-lg font-semibold text-gray-700 mb-2">
+                    Want to be on the leaderboard? 🚀
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    Complete your profile, add a great photo, write an interesting bio, and be active!
+                  </p>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Search Tab */}
+            <TabsContent value="search">
+              <div className="max-w-4xl mx-auto">
+                <div className="text-center mb-8">
+                  <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 mb-2">
+                    Search Students
+                  </h2>
+                  <p className="text-gray-600">Find students by name, email, or department</p>
+                </div>
+
+                {/* Search Bar */}
+                <div className="mb-8">
+                  <div className="flex gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      <Input
+                        type="text"
+                        placeholder="Search by name, email, or department..."
+                        value={searchQuery}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value)
+                        }}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSearch()
+                          }
+                        }}
+                        className="pl-12 h-14 text-lg border-2 focus:border-purple-500"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleSearch}
+                      disabled={isSearching || !searchQuery.trim()}
+                      className="h-14 px-8 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                    >
+                      {isSearching ? 'Searching...' : 'Search'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Search Results */}
+                <div>
+                  {/* Loading State */}
+                  {isSearching && (
+                    <Card className="p-12">
+                      <div className="text-center text-gray-500">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                        <p className="text-xl">Searching...</p>
+                        <p className="text-sm mt-2">Looking for "{searchQuery}"</p>
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* No Results */}
+                  {!isSearching && searchQuery && searchResults.length === 0 && (
+                    <Card className="p-12">
+                      <div className="text-center text-gray-500">
+                        <Search className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                        <p className="text-xl font-semibold">No users found</p>
+                        <p className="text-sm mt-2">No one matches "{searchQuery}"</p>
+                        <p className="text-xs text-gray-400 mt-2">Try searching with different keywords like name, email, or department</p>
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Empty State - Before Search */}
+                  {!isSearching && !searchQuery && (
+                    <Card className="p-12">
+                      <div className="text-center text-gray-500">
+                        <Search className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                        <p className="text-xl font-semibold">Start searching</p>
+                        <p className="text-sm mt-2">Enter a name, email, or department to find students</p>
+                        <div className="mt-4 text-xs text-gray-400">
+                          <p>💡 Try searching for:</p>
+                          <p>• Student name (e.g., "John", "Sarah")</p>
+                          <p>• Email ID (e.g., "23eg105")</p>
+                          <p>• Department (e.g., "CSE", "ECE")</p>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Search Results */}
+                  {!isSearching && searchResults.length > 0 && (
+                    <div className="space-y-4">
+                      <p className="text-gray-600 mb-4">Found {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}</p>
+                      {searchResults.map((profile) => (
+                        <Card
+                          key={profile.id}
+                          className="hover:shadow-xl transition-all cursor-pointer hover:scale-[1.01]"
+                          onClick={() => {
+                            setSelectedProfile(profile)
+                            setShowProfileModal(true)
+                          }}
+                        >
+                          <CardContent className="p-4 md:p-6">
+                            {/* Desktop Layout - Side by side */}
+                            <div className="hidden md:flex items-start gap-6">
+                              {/* Profile Photo */}
+                              <div className="relative">
+                                <Avatar className="h-24 w-24 border-4 border-purple-200 group-hover:border-purple-400 transition-all">
+                                  <AvatarImage src={profile.photo_url} />
+                                  <AvatarFallback className="text-2xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
+                                    {profile.name?.charAt(0) || 'U'}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 shadow-lg">
+                                  <Eye className="h-4 w-4 text-purple-600" />
                                 </div>
                               </div>
+
+                              {/* Profile Info */}
+                              <div className="flex-1">
+                                <h3 className="text-2xl font-bold mb-2 text-purple-900">{profile.name}</h3>
+                                <div className="space-y-2 text-sm text-gray-600">
+                                  <p className="flex items-center gap-2">
+                                    <Mail className="h-4 w-4" />
+                                    {profile.email}
+                                  </p>
+                                  <p className="flex items-center gap-2">
+                                    <User className="h-4 w-4" />
+                                    {profile.department} • {profile.year} Year
+                                  </p>
+                                  {profile.bio && (
+                                    <p className="text-gray-700 mt-3 line-clamp-2">{profile.bio}</p>
+                                  )}
+                                  {profile.interests && profile.interests.length > 0 && (
+                                    <div className="flex flex-wrap gap-2 mt-3">
+                                      {profile.interests.slice(0, 3).map((interest, index) => (
+                                        <Badge key={index} variant="secondary" className="bg-purple-100 text-purple-700">
+                                          {interest}
+                                        </Badge>
+                                      ))}
+                                      {profile.interests.length > 3 && (
+                                        <Badge variant="secondary" className="bg-gray-100 text-gray-600">
+                                          +{profile.interests.length - 3} more
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Action Buttons - Desktop */}
+                              <div className="flex flex-col gap-2">
+                                <Button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedProfile(profile)
+                                    setShowProfileModal(true)
+                                  }}
+                                  variant="outline"
+                                  className="border-2 border-purple-300 hover:bg-purple-50"
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </Button>
+                                {!likedProfiles.has(profile.id) ? (
+                                  <Button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleLike(profile.id)
+                                    }}
+                                    className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                                  >
+                                    <Heart className="h-4 w-4 mr-2" />
+                                    Like
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleUnlike(profile.id)
+                                    }}
+                                    variant="outline"
+                                    className="border-2 border-red-300 hover:bg-red-50 text-red-600"
+                                  >
+                                    <HeartCrack className="h-4 w-4 mr-2" />
+                                    Unlike
+                                  </Button>
+                                )}
+                              </div>
                             </div>
+
+                            {/* Mobile Layout - Stacked */}
+                            <div className="md:hidden space-y-4">
+                              {/* Profile Photo and Name */}
+                              <div className="flex items-start gap-4">
+                                <div className="relative">
+                                  <Avatar className="h-16 w-16 border-4 border-purple-200">
+                                    <AvatarImage src={profile.photo_url} />
+                                    <AvatarFallback className="text-xl bg-gradient-to-br from-purple-400 to-pink-400 text-white">
+                                      {profile.name?.charAt(0) || 'U'}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                </div>
+                                <div className="flex-1">
+                                  <h3 className="text-xl font-bold text-purple-900">{profile.name}</h3>
+                                  <p className="text-sm text-gray-600 mt-1">
+                                    {profile.department} • {profile.year} Year
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Email */}
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Mail className="h-4 w-4 flex-shrink-0" />
+                                <span className="truncate">{profile.email}</span>
+                              </div>
+
+                              {/* Bio */}
+                              {profile.bio && (
+                                <p className="text-sm text-gray-700 leading-relaxed line-clamp-3">{profile.bio}</p>
+                              )}
+
+                              {/* Interests */}
+                              {profile.interests && profile.interests.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {profile.interests.slice(0, 4).map((interest, index) => (
+                                    <Badge key={index} variant="secondary" className="bg-purple-100 text-purple-700 text-xs">
+                                      {interest}
+                                    </Badge>
+                                  ))}
+                                  {profile.interests.length > 4 && (
+                                    <Badge variant="secondary" className="bg-gray-100 text-gray-600 text-xs">
+                                      +{profile.interests.length - 4}
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Action Buttons - Mobile (Full Width Below Profile) */}
+                              <div className="flex gap-2 pt-2 border-t">
+                                <Button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedProfile(profile)
+                                    setShowProfileModal(true)
+                                  }}
+                                  variant="outline"
+                                  className="flex-1 border-2 border-purple-300 hover:bg-purple-50"
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </Button>
+                                {!likedProfiles.has(profile.id) ? (
+                                  <Button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleLike(profile.id)
+                                    }}
+                                    className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                                  >
+                                    <Heart className="h-4 w-4 mr-2" />
+                                    Like
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleUnlike(profile.id)
+                                    }}
+                                    variant="outline"
+                                    className="flex-1 border-2 border-red-300 hover:bg-red-50 text-red-600"
+                                  >
+                                    <HeartCrack className="h-4 w-4 mr-2" />
+                                    Unlike
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Friends Tab */}
+            <TabsContent value="matches">
+              <div className="max-w-6xl mx-auto">
+                {/* Mobile Full-Page Chat View */}
+                {isMobileChatOpen && selectedMatch ? (
+                  <div className="fixed inset-0 bg-white z-50 flex flex-col md:hidden">
+                    {/* Chat Header */}
+                    <div className="bg-gradient-to-r from-pink-500 to-purple-500 text-white p-4 shadow-lg">
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setIsMobileChatOpen(false)
+                            setSelectedMatch(null)
+                          }}
+                          className="text-white hover:bg-white/20 p-2"
+                        >
+                          <X className="h-6 w-6" />
+                        </Button>
+                        <div className="relative">
+                          <Avatar className="h-10 w-10 border-2 border-white">
+                            <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                            <AvatarFallback>{selectedMatch.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
+                          </Avatar>
+                          {onlineUsers.has(selectedMatch.matchedUser?.id) && (
+                            <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></span>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-bold text-lg">{selectedMatch.matchedUser?.name}</h3>
+                          <p className="text-xs text-white/90">
+                            {onlineUsers.has(selectedMatch.matchedUser?.id) ? (
+                              <span className="flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse"></span>
+                                Active now
+                              </span>
+                            ) : (
+                              `${selectedMatch.matchedUser?.department} • ${selectedMatch.matchedUser?.year} Year`
+                            )}
+                          </p>
+                        </div>
+                        {/* Options Menu */}
+                        <div className="flex items-center gap-1">
+                          {!selectedMatch.isBlocked && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm(`Remove ${selectedMatch.matchedUser?.name} from friends?`)) {
+                                  removeFriend(selectedMatch.matchedUser?.id)
+                                  setIsMobileChatOpen(false)
+                                }
+                              }}
+                              className="text-white hover:bg-white/20 p-2"
+                              title="Remove Friend"
+                            >
+                              <UserMinus className="h-5 w-5" />
+                            </Button>
+                          )}
+
+                          {selectedMatch.isBlocked && selectedMatch.blockedBy === 'me' ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
+                                  try {
+                                    const response = await fetch('/api/unblock-user', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        blockerId: currentUser.id,
+                                        blockedId: selectedMatch.matchedUser?.id
+                                      })
+                                    })
+                                    if (response.ok) {
+                                      toast.success('User unblocked!')
+                                      setBlockedUsers(prev => {
+                                        const newSet = new Set(prev)
+                                        newSet.delete(selectedMatch.matchedUser?.id)
+                                        return newSet
+                                      })
+                                      setBlockedUsersList(prev => prev.filter(u => u.id !== selectedMatch.matchedUser?.id))
+                                      loadMatches(currentUser.id)
+                                    } else {
+                                      toast.error('Failed to unblock')
+                                    }
+                                  } catch (error) {
+                                    toast.error('Error unblocking')
+                                  }
+                                }
+                              }}
+                              className="text-white hover:bg-white/20 p-2"
+                              title="Unblock"
+                            >
+                              <UserPlus className="h-5 w-5" />
+                            </Button>
+                          ) : !selectedMatch.isBlocked && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm(`Block ${selectedMatch.matchedUser?.name}?`)) {
+                                  blockUser(selectedMatch.matchedUser?.id)
+                                }
+                              }}
+                              className="text-white hover:bg-white/20 p-2"
+                              title="Block"
+                            >
+                              <UserX className="h-5 w-5" />
+                            </Button>
                           )}
                         </div>
                       </div>
+                    </div>
 
-                      {/* Message Input */}
-                      <div className="border-t bg-white p-4 shadow-lg">
-                        <form onSubmit={handleSendMessage} className="flex gap-2">
-                          <Input
-                            type="text"
-                            placeholder="Type a message..."
-                            value={messageInput}
-                            onChange={(e) => {
-                              setMessageInput(e.target.value)
-                              handleTyping()
-                            }}
-                            className="flex-1 rounded-full border-2 border-gray-200 focus:border-purple-400 px-4"
-                          />
-                          <Button 
-                            type="submit"
-                            disabled={!messageInput.trim()}
-                            className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 rounded-full h-11 w-11 p-0"
-                          >
-                            <Send className="h-5 w-5" />
-                          </Button>
-                        </form>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <h2 className="text-3xl font-bold text-center mb-8">Your Friends</h2>
-                  {matches.length === 0 ? (
-                    <Card className="p-12">
-                      <div className="text-center text-gray-500">
-                        <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                        <p className="text-xl">No friends yet</p>
-                        <p className="text-sm mt-2">Start liking profiles to find your match!</p>
-                      </div>
-                    </Card>
-                  ) : (
-                    <div className="grid lg:grid-cols-3 gap-6">
-                      {/* Friend List - Scrollable Container */}
-                      <div className="lg:col-span-1 space-y-4 lg:h-[600px] lg:overflow-y-auto lg:pr-2 scroll-smooth">
-                        {matches.map((match) => {
-                          const isOnline = onlineUsers.has(match.matchedUser?.id)
-                          const hasUnread = unreadMessages.has(match.id)
-                          return (
-                            <Card 
-                              key={match.id}
-                              className={`cursor-pointer hover:shadow-lg transition-all ${selectedMatch?.id === match.id ? 'ring-2 ring-purple-500' : ''}`}
-                              onClick={() => {
-                                // Clear messages before switching to prevent cross-chat contamination
-                                setMessages([])
-                                
-                                // Clear unread badge for this specific user
-                                setUnreadMessages(prev => {
-                                  const newSet = new Set(prev)
-                                  newSet.delete(match.id)
-                                  return newSet
-                                })
-                                
-                                // Mark as read in localStorage
-                                localStorage.setItem(`lastRead_${match.id}`, new Date().toISOString())
-                                
-                                // Check if mobile view
-                                if (window.innerWidth < 1024) {
-                                  setSelectedMatch(match)
-                                  setIsMobileChatOpen(true)
-                                } else {
-                                  setSelectedMatch(match)
+                    {/* Chat Messages Area */}
+                    {selectedMatch.isBlocked ? (
+                      <div className="flex-1 flex items-center justify-center p-6 bg-gray-50">
+                        <div className="text-center max-w-sm">
+                          <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
+                          <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                            Can't Chat
+                          </h3>
+                          <p className="text-gray-600">
+                            {selectedMatch.blockedBy === 'them' ? (
+                              <>This user has blocked you.</>
+                            ) : (
+                              <>You have blocked this user.</>
+                            )}
+                          </p>
+                          {selectedMatch.blockedBy === 'me' && (
+                            <Button
+                              onClick={async () => {
+                                if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
+                                  try {
+                                    const response = await fetch('/api/unblock-user', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        blockerId: currentUser.id,
+                                        blockedId: selectedMatch.matchedUser?.id
+                                      })
+                                    })
+                                    if (response.ok) {
+                                      toast.success('Unblocked!')
+                                      setBlockedUsers(prev => {
+                                        const newSet = new Set(prev)
+                                        newSet.delete(selectedMatch.matchedUser?.id)
+                                        return newSet
+                                      })
+                                      setBlockedUsersList(prev => prev.filter(u => u.id !== selectedMatch.matchedUser?.id))
+                                      loadMatches(currentUser.id)
+                                    }
+                                  } catch (error) {
+                                    toast.error('Error')
+                                  }
                                 }
                               }}
+                              className="mt-4 bg-purple-500 hover:bg-purple-600"
                             >
-                              <CardContent className="p-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="relative">
-                                    <Avatar className="h-12 w-12">
-                                      <AvatarImage src={match.matchedUser?.photo_url} />
-                                      <AvatarFallback>{match.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
-                                    </Avatar>
-                                    {/* Online status indicator */}
-                                    {isOnline && (
-                                      <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-                                    )}
-                                  </div>
-                                  <div className="flex-1">
-                                    <h3 className="font-semibold">{match.matchedUser?.name}</h3>
-                                    <p className="text-xs text-gray-500">
-                                      {isOnline ? (
-                                        <span className="text-green-600 flex items-center gap-1">
-                                          <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
-                                          Online
-                                        </span>
-                                      ) : (
-                                        match.matchedUser?.department || 'Student'
-                                      )}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {/* Red notification dot for unread messages */}
-                                    {hasUnread && (
-                                      <div className="relative flex items-center justify-center">
-                                        <span className="flex h-3 w-3">
-                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 border-2 border-white shadow-lg"></span>
-                                        </span>
-                                      </div>
-                                    )}
-                                    <MessageCircle className="h-5 w-5 text-purple-500" />
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          )
-                        })}
+                              Unblock User
+                            </Button>
+                          )}
+                        </div>
                       </div>
-
-                      {/* Chat Area - Desktop Only */}
-                      <div className="hidden lg:block lg:col-span-2">
-                        {selectedMatch ? (
-                      <Card className="h-[600px] flex flex-col">
-                        <CardHeader className="border-b">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="relative">
-                                <Avatar>
-                                  <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
-                                  <AvatarFallback>{selectedMatch.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
-                                </Avatar>
-                                {/* Online status indicator */}
-                                {onlineUsers.has(selectedMatch.matchedUser?.id) && (
-                                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
-                                )}
-                              </div>
-                              <div>
-                                <CardTitle>{selectedMatch.matchedUser?.name}</CardTitle>
-                                <CardDescription>
-                                  {onlineUsers.has(selectedMatch.matchedUser?.id) ? (
-                                    <span className="text-green-600 flex items-center gap-1">
-                                      <span className="w-1.5 h-1.5 bg-green-600 rounded-full animate-pulse"></span>
-                                      Active now
-                                    </span>
-                                  ) : (
-                                    `${selectedMatch.matchedUser?.department} • ${selectedMatch.matchedUser?.year} Year`
-                                  )}
-                                </CardDescription>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {/* Show Remove Friend only if not blocked */}
-                              {!selectedMatch.isBlocked && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm"
-                                  onClick={() => {
-                                    if (confirm(`Remove ${selectedMatch.matchedUser?.name} from friends? You can send them a friend request again later from the Discover tab.`)) {
-                                      removeFriend(selectedMatch.matchedUser?.id)
-                                    }
-                                  }}
-                                  className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                                  title="Remove Friend"
-                                >
-                                  <UserMinus className="h-4 w-4" />
-                                </Button>
-                              )}
-                              
-                              {/* Show Block/Unblock button based on status */}
-                              {selectedMatch.isBlocked && selectedMatch.blockedBy === 'me' ? (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm"
-                                  onClick={async () => {
-                                    if (confirm(`Unblock ${selectedMatch.matchedUser?.name}? You will be able to chat normally again.`)) {
-                                      try {
-                                        const response = await fetch('/api/unblock-user', {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({
-                                            blockerId: currentUser.id,
-                                            blockedId: selectedMatch.matchedUser?.id
-                                          })
-                                        })
-                                        if (response.ok) {
-                                          toast.success('User unblocked - You can chat now!')
-                                          setBlockedUsers(prev => {
-                                            const newSet = new Set(prev)
-                                            newSet.delete(selectedMatch.matchedUser?.id)
-                                            return newSet
-                                          })
-                                          loadMatches(currentUser.id)
-                                        } else {
-                                          toast.error('Failed to unblock user')
-                                        }
-                                      } catch (error) {
-                                        toast.error('Failed to unblock user')
-                                      }
-                                    }
-                                  }}
-                                  className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                                  title="Unblock User"
-                                >
-                                  <UserPlus className="h-4 w-4" />
-                                </Button>
-                              ) : !selectedMatch.isBlocked && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm"
-                                  onClick={() => {
-                                    if (confirm(`Block ${selectedMatch.matchedUser?.name}? You won't be able to chat anymore.`)) {
-                                      blockUser(selectedMatch.matchedUser?.id)
-                                    }
-                                  }}
-                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  title="Block User"
-                                >
-                                  <UserX className="h-4 w-4" />
-                                </Button>
-                              )}
-                              
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={() => setSelectedMatch(null)}
-                                title="Close Chat"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        
-                        {/* Check if blocked */}
-                        {selectedMatch.isBlocked ? (
-                          <CardContent className="flex-1 flex items-center justify-center p-8">
-                            <div className="text-center max-w-md">
-                              <div className="mb-6">
-                                <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
-                                <h3 className="text-2xl font-bold text-gray-800 mb-2">
-                                  You Can't Chat Anymore
-                                </h3>
-                                <p className="text-gray-600 leading-relaxed">
-                                  {selectedMatch.blockedBy === 'them' ? (
-                                    <>
-                                      <strong>{selectedMatch.matchedUser?.name}</strong> has blocked you.
-                                      <br />
-                                      You cannot send or receive messages from this user.
-                                    </>
-                                  ) : (
-                                    <>
-                                      You have blocked <strong>{selectedMatch.matchedUser?.name}</strong>.
-                                      <br />
-                                      No messages can be sent or received.
-                                    </>
-                                  )}
-                                </p>
-                              </div>
-                              {selectedMatch.blockedBy === 'me' && (
-                                <Button
-                                  onClick={async () => {
-                                    if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
-                                      try {
-                                        const response = await fetch('/api/unblock-user', {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({
-                                            blockerId: currentUser.id,
-                                            blockedId: selectedMatch.matchedUser?.id
-                                          })
-                                        })
-                                        if (response.ok) {
-                                          toast.success('User unblocked')
-                                          setBlockedUsers(prev => {
-                                            const newSet = new Set(prev)
-                                            newSet.delete(selectedMatch.matchedUser?.id)
-                                            return newSet
-                                          })
-                                          loadMatches(currentUser.id)
-                                        } else {
-                                          toast.error('Failed to unblock user')
-                                        }
-                                      } catch (error) {
-                                        toast.error('Failed to unblock user')
-                                      }
-                                    }
-                                  }}
-                                  variant="outline"
-                                  className="border-2 border-purple-400 text-purple-600 hover:bg-purple-50"
-                                >
-                                  Unblock User
-                                </Button>
-                              )}
-                            </div>
-                          </CardContent>
-                        ) : (
-                          <>
-                            <CardContent id="chat-messages" className="flex-1 overflow-y-auto p-4 scroll-smooth">
+                    ) : (
+                      <>
+                        <div id="mobile-chat-messages" className="flex-1 overflow-y-auto p-4 bg-gray-50 scroll-smooth">
                           <div className="space-y-4">
                             {messages.length === 0 ? (
                               <div className="text-center text-gray-500 py-12">
-                                <MessageCircle className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                                <p>No messages yet. Say hi! 👋</p>
+                                <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                                <p className="text-lg">No messages yet</p>
+                                <p className="text-sm mt-1">Say hi! 👋</p>
                               </div>
                             ) : (
                               messages.map((msg, index) => {
                                 const isCurrentUser = msg.senderId === currentUser.id
                                 const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId
                                 const showDateSeparator = shouldShowDateSeparator(msg, messages[index - 1])
-                                
+
                                 return (
                                   <div key={msg.id}>
                                     {/* Date Separator */}
                                     {showDateSeparator && (
                                       <div className="flex items-center justify-center my-4">
-                                        <div className="bg-gray-200 text-gray-600 text-xs font-medium px-3 py-1 rounded-full">
+                                        <div className="bg-white shadow-sm text-gray-600 text-xs font-medium px-4 py-1.5 rounded-full border border-gray-200">
                                           {formatMessageDate(msg.createdAt)}
                                         </div>
                                       </div>
                                     )}
-                                    
+
                                     {/* Message */}
                                     <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-                                      <div className={`flex items-end gap-2 ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                                      <div className={`flex items-end gap-2 max-w-[85%] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
                                         {showAvatar && !isCurrentUser && (
-                                          <Avatar className="h-8 w-8">
+                                          <Avatar className="h-8 w-8 flex-shrink-0">
                                             <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
                                             <AvatarFallback className="text-xs">
                                               {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
@@ -5293,41 +4921,38 @@ export default function App() {
                                           </Avatar>
                                         )}
                                         {showAvatar && isCurrentUser && (
-                                          <Avatar className="h-8 w-8">
+                                          <Avatar className="h-8 w-8 flex-shrink-0">
                                             <AvatarImage src={currentUser?.photo_url} />
                                             <AvatarFallback className="text-xs">
                                               {currentUser?.name?.charAt(0) || 'U'}
                                             </AvatarFallback>
                                           </Avatar>
                                         )}
-                                        {!showAvatar && <div className="w-8"></div>}
-                                      
-                                      <div 
-                                        className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                                          isCurrentUser 
-                                            ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white' 
-                                            : 'bg-gray-200 text-gray-900'
-                                        }`}
-                                      >
-                                        <p className="break-words">{msg.message}</p>
-                                        <p className={`text-xs mt-1 ${
-                                          isCurrentUser ? 'text-pink-100' : 'text-gray-500'
-                                        }`}>
-                                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </p>
+                                        {!showAvatar && <div className="w-8 flex-shrink-0"></div>}
+
+                                        <div
+                                          className={`rounded-2xl px-4 py-2.5 ${isCurrentUser
+                                            ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white'
+                                            : 'bg-white text-gray-900 shadow-sm'
+                                            }`}
+                                        >
+                                          <p className="break-words text-sm leading-relaxed">{msg.message}</p>
+                                          <p className={`text-xs mt-1 ${isCurrentUser ? 'text-pink-100' : 'text-gray-400'
+                                            }`}>
+                                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                          </p>
+                                        </div>
                                       </div>
-                                    </div>
                                     </div>
                                   </div>
                                 )
                               })
                             )}
-                            {/* Typing indicator */}
                             {isTyping && (
                               <div className="flex justify-start">
-                                <div className="bg-gray-200 rounded-2xl px-4 py-3">
+                                <div className="bg-white rounded-2xl px-4 py-3 shadow-sm">
                                   <div className="flex gap-1">
-                                    <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                    <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
                                     <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
                                     <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
                                   </div>
@@ -5335,8 +4960,10 @@ export default function App() {
                               </div>
                             )}
                           </div>
-                        </CardContent>
-                        <div className="border-t p-4">
+                        </div>
+
+                        {/* Message Input */}
+                        <div className="border-t bg-white p-4 shadow-lg">
                           <form onSubmit={handleSendMessage} className="flex gap-2">
                             <Input
                               type="text"
@@ -5346,134 +4973,502 @@ export default function App() {
                                 setMessageInput(e.target.value)
                                 handleTyping()
                               }}
-                              className="flex-1"
+                              className="flex-1 rounded-full border-2 border-gray-200 focus:border-purple-400 px-4"
                             />
-                            <Button 
+                            <Button
                               type="submit"
                               disabled={!messageInput.trim()}
-                              className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                              className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 rounded-full h-11 w-11 p-0"
                             >
-                              <Send className="h-4 w-4" />
+                              <Send className="h-5 w-5" />
                             </Button>
                           </form>
                         </div>
-                          </>
-                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <h2 className="text-3xl font-bold text-center mb-8">Your Friends</h2>
+                    {matches.length === 0 ? (
+                      <Card className="p-12">
+                        <div className="text-center text-gray-500">
+                          <Heart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                          <p className="text-xl">No friends yet</p>
+                          <p className="text-sm mt-2">Start liking profiles to find your match!</p>
+                        </div>
                       </Card>
                     ) : (
-                      <Card className="h-[600px] flex items-center justify-center">
-                        <div className="text-center text-gray-500">
-                          <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                          <p className="text-xl">Select a match to start chatting</p>
+                      <div className="grid lg:grid-cols-3 gap-6">
+                        {/* Friend List - Scrollable Container */}
+                        <div className="lg:col-span-1 space-y-4 lg:h-[600px] lg:overflow-y-auto lg:pr-2 scroll-smooth">
+                          {matches.map((match) => {
+                            const isOnline = onlineUsers.has(match.matchedUser?.id)
+                            const hasUnread = unreadMessages.has(match.id)
+                            return (
+                              <Card
+                                key={match.id}
+                                className={`cursor-pointer hover:shadow-lg transition-all ${selectedMatch?.id === match.id ? 'ring-2 ring-purple-500' : ''}`}
+                                onClick={() => {
+                                  // Clear messages before switching to prevent cross-chat contamination
+                                  setMessages([])
+
+                                  // Clear unread badge for this specific user
+                                  setUnreadMessages(prev => {
+                                    const newSet = new Set(prev)
+                                    newSet.delete(match.id)
+                                    return newSet
+                                  })
+
+                                  // Mark as read in localStorage
+                                  localStorage.setItem(`lastRead_${match.id}`, new Date().toISOString())
+
+                                  // Check if mobile view
+                                  if (window.innerWidth < 1024) {
+                                    setSelectedMatch(match)
+                                    setIsMobileChatOpen(true)
+                                  } else {
+                                    setSelectedMatch(match)
+                                  }
+                                }}
+                              >
+                                <CardContent className="p-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="relative">
+                                      <Avatar className="h-12 w-12">
+                                        <AvatarImage src={match.matchedUser?.photo_url} />
+                                        <AvatarFallback>{match.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
+                                      </Avatar>
+                                      {/* Online status indicator */}
+                                      {isOnline && (
+                                        <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+                                      )}
+                                    </div>
+                                    <div className="flex-1">
+                                      <h3 className="font-semibold">{match.matchedUser?.name}</h3>
+                                      <p className="text-xs text-gray-500">
+                                        {isOnline ? (
+                                          <span className="text-green-600 flex items-center gap-1">
+                                            <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
+                                            Online
+                                          </span>
+                                        ) : (
+                                          match.matchedUser?.department || 'Student'
+                                        )}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {/* Red notification dot for unread messages */}
+                                      {hasUnread && (
+                                        <div className="relative flex items-center justify-center">
+                                          <span className="flex h-3 w-3">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 border-2 border-white shadow-lg"></span>
+                                          </span>
+                                        </div>
+                                      )}
+                                      <MessageCircle className="h-5 w-5 text-purple-500" />
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )
+                          })}
                         </div>
-                      </Card>
-                    )}
+
+                        {/* Chat Area - Desktop Only */}
+                        <div className="hidden lg:block lg:col-span-2">
+                          {selectedMatch ? (
+                            <Card className="h-[600px] flex flex-col">
+                              <CardHeader className="border-b">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="relative">
+                                      <Avatar>
+                                        <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                                        <AvatarFallback>{selectedMatch.matchedUser?.name?.charAt(0) || 'U'}</AvatarFallback>
+                                      </Avatar>
+                                      {/* Online status indicator */}
+                                      {onlineUsers.has(selectedMatch.matchedUser?.id) && (
+                                        <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <CardTitle>{selectedMatch.matchedUser?.name}</CardTitle>
+                                      <CardDescription>
+                                        {onlineUsers.has(selectedMatch.matchedUser?.id) ? (
+                                          <span className="text-green-600 flex items-center gap-1">
+                                            <span className="w-1.5 h-1.5 bg-green-600 rounded-full animate-pulse"></span>
+                                            Active now
+                                          </span>
+                                        ) : (
+                                          `${selectedMatch.matchedUser?.department} • ${selectedMatch.matchedUser?.year} Year`
+                                        )}
+                                      </CardDescription>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {/* Show Remove Friend only if not blocked */}
+                                    {!selectedMatch.isBlocked && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          if (confirm(`Remove ${selectedMatch.matchedUser?.name} from friends? You can send them a friend request again later from the Discover tab.`)) {
+                                            removeFriend(selectedMatch.matchedUser?.id)
+                                          }
+                                        }}
+                                        className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                        title="Remove Friend"
+                                      >
+                                        <UserMinus className="h-4 w-4" />
+                                      </Button>
+                                    )}
+
+                                    {/* Show Block/Unblock button based on status */}
+                                    {selectedMatch.isBlocked && selectedMatch.blockedBy === 'me' ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={async () => {
+                                          if (confirm(`Unblock ${selectedMatch.matchedUser?.name}? You will be able to chat normally again.`)) {
+                                            try {
+                                              const response = await fetch('/api/unblock-user', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                  blockerId: currentUser.id,
+                                                  blockedId: selectedMatch.matchedUser?.id
+                                                })
+                                              })
+                                              if (response.ok) {
+                                                toast.success('User unblocked - You can chat now!')
+                                                setBlockedUsers(prev => {
+                                                  const newSet = new Set(prev)
+                                                  newSet.delete(selectedMatch.matchedUser?.id)
+                                                  return newSet
+                                                })
+                                                loadMatches(currentUser.id)
+                                              } else {
+                                                toast.error('Failed to unblock user')
+                                              }
+                                            } catch (error) {
+                                              toast.error('Failed to unblock user')
+                                            }
+                                          }
+                                        }}
+                                        className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                        title="Unblock User"
+                                      >
+                                        <UserPlus className="h-4 w-4" />
+                                      </Button>
+                                    ) : !selectedMatch.isBlocked && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          if (confirm(`Block ${selectedMatch.matchedUser?.name}? You won't be able to chat anymore.`)) {
+                                            blockUser(selectedMatch.matchedUser?.id)
+                                          }
+                                        }}
+                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                        title="Block User"
+                                      >
+                                        <UserX className="h-4 w-4" />
+                                      </Button>
+                                    )}
+
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setSelectedMatch(null)}
+                                      title="Close Chat"
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardHeader>
+
+                              {/* Check if blocked */}
+                              {selectedMatch.isBlocked ? (
+                                <CardContent className="flex-1 flex items-center justify-center p-8">
+                                  <div className="text-center max-w-md">
+                                    <div className="mb-6">
+                                      <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
+                                      <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                                        You Can't Chat Anymore
+                                      </h3>
+                                      <p className="text-gray-600 leading-relaxed">
+                                        {selectedMatch.blockedBy === 'them' ? (
+                                          <>
+                                            <strong>{selectedMatch.matchedUser?.name}</strong> has blocked you.
+                                            <br />
+                                            You cannot send or receive messages from this user.
+                                          </>
+                                        ) : (
+                                          <>
+                                            You have blocked <strong>{selectedMatch.matchedUser?.name}</strong>.
+                                            <br />
+                                            No messages can be sent or received.
+                                          </>
+                                        )}
+                                      </p>
+                                    </div>
+                                    {selectedMatch.blockedBy === 'me' && (
+                                      <Button
+                                        onClick={async () => {
+                                          if (confirm(`Unblock ${selectedMatch.matchedUser?.name}?`)) {
+                                            try {
+                                              const response = await fetch('/api/unblock-user', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                  blockerId: currentUser.id,
+                                                  blockedId: selectedMatch.matchedUser?.id
+                                                })
+                                              })
+                                              if (response.ok) {
+                                                toast.success('User unblocked')
+                                                setBlockedUsers(prev => {
+                                                  const newSet = new Set(prev)
+                                                  newSet.delete(selectedMatch.matchedUser?.id)
+                                                  return newSet
+                                                })
+                                                loadMatches(currentUser.id)
+                                              } else {
+                                                toast.error('Failed to unblock user')
+                                              }
+                                            } catch (error) {
+                                              toast.error('Failed to unblock user')
+                                            }
+                                          }
+                                        }}
+                                        variant="outline"
+                                        className="border-2 border-purple-400 text-purple-600 hover:bg-purple-50"
+                                      >
+                                        Unblock User
+                                      </Button>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              ) : (
+                                <>
+                                  <CardContent id="chat-messages" className="flex-1 overflow-y-auto p-4 scroll-smooth">
+                                    <div className="space-y-4">
+                                      {messages.length === 0 ? (
+                                        <div className="text-center text-gray-500 py-12">
+                                          <MessageCircle className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                                          <p>No messages yet. Say hi! 👋</p>
+                                        </div>
+                                      ) : (
+                                        messages.map((msg, index) => {
+                                          const isCurrentUser = msg.senderId === currentUser.id
+                                          const showAvatar = index === 0 || messages[index - 1].senderId !== msg.senderId
+                                          const showDateSeparator = shouldShowDateSeparator(msg, messages[index - 1])
+
+                                          return (
+                                            <div key={msg.id}>
+                                              {/* Date Separator */}
+                                              {showDateSeparator && (
+                                                <div className="flex items-center justify-center my-4">
+                                                  <div className="bg-gray-200 text-gray-600 text-xs font-medium px-3 py-1 rounded-full">
+                                                    {formatMessageDate(msg.createdAt)}
+                                                  </div>
+                                                </div>
+                                              )}
+
+                                              {/* Message */}
+                                              <div className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                                                <div className={`flex items-end gap-2 ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                                                  {showAvatar && !isCurrentUser && (
+                                                    <Avatar className="h-8 w-8">
+                                                      <AvatarImage src={selectedMatch.matchedUser?.photo_url} />
+                                                      <AvatarFallback className="text-xs">
+                                                        {selectedMatch.matchedUser?.name?.charAt(0) || 'U'}
+                                                      </AvatarFallback>
+                                                    </Avatar>
+                                                  )}
+                                                  {showAvatar && isCurrentUser && (
+                                                    <Avatar className="h-8 w-8">
+                                                      <AvatarImage src={currentUser?.photo_url} />
+                                                      <AvatarFallback className="text-xs">
+                                                        {currentUser?.name?.charAt(0) || 'U'}
+                                                      </AvatarFallback>
+                                                    </Avatar>
+                                                  )}
+                                                  {!showAvatar && <div className="w-8"></div>}
+
+                                                  <div
+                                                    className={`max-w-[70%] rounded-2xl px-4 py-2 ${isCurrentUser
+                                                      ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white'
+                                                      : 'bg-gray-200 text-gray-900'
+                                                      }`}
+                                                  >
+                                                    <p className="break-words">{msg.message}</p>
+                                                    <p className={`text-xs mt-1 ${isCurrentUser ? 'text-pink-100' : 'text-gray-500'
+                                                      }`}>
+                                                      {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </p>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )
+                                        })
+                                      )}
+                                      {/* Typing indicator */}
+                                      {isTyping && (
+                                        <div className="flex justify-start">
+                                          <div className="bg-gray-200 rounded-2xl px-4 py-3">
+                                            <div className="flex gap-1">
+                                              <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                              <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                              <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </CardContent>
+                                  <div className="border-t p-4">
+                                    <form onSubmit={handleSendMessage} className="flex gap-2">
+                                      <Input
+                                        type="text"
+                                        placeholder="Type a message..."
+                                        value={messageInput}
+                                        onChange={(e) => {
+                                          setMessageInput(e.target.value)
+                                          handleTyping()
+                                        }}
+                                        className="flex-1"
+                                      />
+                                      <Button
+                                        type="submit"
+                                        disabled={!messageInput.trim()}
+                                        className="bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                                      >
+                                        <Send className="h-4 w-4" />
+                                      </Button>
+                                    </form>
+                                  </div>
+                                </>
+                              )}
+                            </Card>
+                          ) : (
+                            <Card className="h-[600px] flex items-center justify-center">
+                              <div className="text-center text-gray-500">
+                                <MessageCircle className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                                <p className="text-xl">Select a match to start chatting</p>
+                              </div>
+                            </Card>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* Blocked Users Tab */}
-          <TabsContent value="blocked">
-            <div className="max-w-4xl mx-auto">
-              <div className="text-center mb-8">
-                <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-orange-600 to-yellow-600 mb-2">
-                  Blocked Users
-                </h2>
-                <p className="text-gray-600">Users you have blocked</p>
+                    )}
+                  </>
+                )}
               </div>
+            </TabsContent>
 
-              {blockedUsersList.length === 0 ? (
-                <Card className="p-12">
-                  <div className="text-center text-gray-500">
-                    <UserX className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-xl font-semibold">No blocked users</p>
-                    <p className="text-sm mt-2">You haven't blocked anyone yet</p>
-                  </div>
-                </Card>
-              ) : (
-                <div className="space-y-4">
-                  {blockedUsersList.map((user) => (
-                    <Card 
-                      key={user.id} 
-                      className="hover:shadow-xl transition-all"
-                    >
-                      <CardContent className="p-6">
-                        <div className="flex items-center gap-6">
-                          {/* Profile Photo */}
-                          <Avatar className="h-20 w-20 border-4 border-gray-200">
-                            <AvatarImage src={user.photo_url} />
-                            <AvatarFallback className="text-2xl bg-gradient-to-br from-gray-400 to-gray-600 text-white">
-                              {user.name?.charAt(0) || 'U'}
-                            </AvatarFallback>
-                          </Avatar>
+            {/* Blocked Users Tab */}
+            <TabsContent value="blocked">
+              <div className="max-w-4xl mx-auto">
+                <div className="text-center mb-8">
+                  <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-orange-600 to-yellow-600 mb-2">
+                    Blocked Users
+                  </h2>
+                  <p className="text-gray-600">Users you have blocked</p>
+                </div>
 
-                          {/* Profile Info */}
-                          <div className="flex-1">
-                            <h3 className="text-2xl font-bold mb-1 text-gray-900">
-                              {user.name}
-                            </h3>
-                            <div className="space-y-1 text-sm text-gray-600">
-                              <p className="flex items-center gap-2">
-                                <Mail className="h-4 w-4" />
-                                {user.email}
-                              </p>
-                              <p className="flex items-center gap-2">
-                                <User className="h-4 w-4" />
-                                {user.department} • {user.year} Year
-                              </p>
+                {blockedUsersList.length === 0 ? (
+                  <Card className="p-12">
+                    <div className="text-center text-gray-500">
+                      <UserX className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-xl font-semibold">No blocked users</p>
+                      <p className="text-sm mt-2">You haven't blocked anyone yet</p>
+                    </div>
+                  </Card>
+                ) : (
+                  <div className="space-y-4">
+                    {blockedUsersList.map((user) => (
+                      <Card
+                        key={user.id}
+                        className="hover:shadow-xl transition-all"
+                      >
+                        <CardContent className="p-6">
+                          <div className="flex items-center gap-6">
+                            {/* Profile Photo */}
+                            <Avatar className="h-20 w-20 border-4 border-gray-200">
+                              <AvatarImage src={user.photo_url} />
+                              <AvatarFallback className="text-2xl bg-gradient-to-br from-gray-400 to-gray-600 text-white">
+                                {user.name?.charAt(0) || 'U'}
+                              </AvatarFallback>
+                            </Avatar>
+
+                            {/* Profile Info */}
+                            <div className="flex-1">
+                              <h3 className="text-2xl font-bold mb-1 text-gray-900">
+                                {user.name}
+                              </h3>
+                              <div className="space-y-1 text-sm text-gray-600">
+                                <p className="flex items-center gap-2">
+                                  <Mail className="h-4 w-4" />
+                                  {user.email}
+                                </p>
+                                <p className="flex items-center gap-2">
+                                  <User className="h-4 w-4" />
+                                  {user.department} • {user.year} Year
+                                </p>
+                              </div>
                             </div>
-                          </div>
 
-                          {/* Unblock Button */}
-                          <div className="flex flex-col gap-2">
-                            <Button
-                              onClick={async () => {
-                                if (confirm(`Unblock ${user.name}? You will be able to interact with them again.`)) {
-                                  try {
-                                    const response = await fetch('/api/unblock-user', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({
-                                        blockerId: currentUser.id,
-                                        blockedId: user.id
+                            {/* Unblock Button */}
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                onClick={async () => {
+                                  if (confirm(`Unblock ${user.name}? You will be able to interact with them again.`)) {
+                                    try {
+                                      const response = await fetch('/api/unblock-user', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          blockerId: currentUser.id,
+                                          blockedId: user.id
+                                        })
                                       })
-                                    })
-                                    if (response.ok) {
-                                      toast.success(`${user.name} unblocked successfully`)
-                                      setBlockedUsers(prev => {
-                                        const newSet = new Set(prev)
-                                        newSet.delete(user.id)
-                                        return newSet
-                                      })
-                                      loadBlockedUsers(currentUser.id)
-                                      loadMatches(currentUser.id)
-                                    } else {
+                                      if (response.ok) {
+                                        toast.success(`${user.name} unblocked successfully`)
+                                        setBlockedUsers(prev => {
+                                          const newSet = new Set(prev)
+                                          newSet.delete(user.id)
+                                          return newSet
+                                        })
+                                        loadBlockedUsers(currentUser.id)
+                                        loadMatches(currentUser.id)
+                                      } else {
+                                        toast.error('Failed to unblock user')
+                                      }
+                                    } catch (error) {
                                       toast.error('Failed to unblock user')
                                     }
-                                  } catch (error) {
-                                    toast.error('Failed to unblock user')
                                   }
-                                }
-                              }}
-                              className="bg-green-500 hover:bg-green-600 text-white"
-                            >
-                              <UserPlus className="h-4 w-4 mr-2" />
-                              Unblock
-                            </Button>
+                                }}
+                                className="bg-green-500 hover:bg-green-600 text-white"
+                              >
+                                <UserPlus className="h-4 w-4 mr-2" />
+                                Unblock
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
         )}
 
         {/* Events Section */}
@@ -5484,9 +5479,9 @@ export default function App() {
               {/* Animated Background Pattern */}
               <div className="absolute inset-0 opacity-10">
                 <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-white rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
               </div>
-              
+
               <div className="relative z-10">
                 <div className="flex items-start justify-between lg:mb-6">
                   <div className="flex-1">
@@ -5499,12 +5494,12 @@ export default function App() {
                         <p className="text-indigo-100 font-medium text-xs sm:text-sm lg:text-base">Discover, Connect & Celebrate</p>
                       </div>
                     </div>
-                    
+
                     {/* Description - Only visible on laptop/PC */}
                     <p className="hidden lg:block text-white/90 text-lg max-w-2xl">
                       Join exciting events, workshops, and activities happening across campus. Never miss an opportunity to learn, grow, and have fun!
                     </p>
-                    
+
                     {/* Event Stats - Mobile View (compact below heading) */}
                     <div className="flex lg:hidden gap-2 mt-2.5">
                       <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
@@ -5521,7 +5516,7 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Event Stats - Desktop View (right side) */}
                   <div className="hidden lg:flex gap-4">
                     <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
@@ -5545,8 +5540,8 @@ export default function App() {
             <Tabs defaultValue="upcoming" className="w-full">
               <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg p-2 border border-gray-100">
                 <TabsList className="grid w-full grid-cols-4 bg-gradient-to-r from-gray-50 to-gray-100 p-1 rounded-xl gap-2">
-                  <TabsTrigger 
-                    value="upcoming" 
+                  <TabsTrigger
+                    value="upcoming"
                     className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
                   >
                     <span className="flex items-center gap-2">
@@ -5554,7 +5549,7 @@ export default function App() {
                       Upcoming
                     </span>
                   </TabsTrigger>
-                  <TabsTrigger 
+                  <TabsTrigger
                     value="ongoing"
                     className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
                   >
@@ -5563,7 +5558,7 @@ export default function App() {
                       Live Now
                     </span>
                   </TabsTrigger>
-                  <TabsTrigger 
+                  <TabsTrigger
                     value="completed"
                     className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-500 data-[state=active]:to-gray-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
                   >
@@ -5572,7 +5567,7 @@ export default function App() {
                       Past
                     </span>
                   </TabsTrigger>
-                  <TabsTrigger 
+                  <TabsTrigger
                     value="all"
                     className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-purple-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 rounded-lg font-semibold"
                   >
@@ -5682,9 +5677,9 @@ export default function App() {
               {/* Animated Background Pattern */}
               <div className="absolute inset-0 opacity-10">
                 <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-white rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
               </div>
-              
+
               <div className="relative z-10">
                 <div className="flex items-start justify-between lg:mb-6">
                   <div className="flex-1">
@@ -5697,12 +5692,12 @@ export default function App() {
                         <p className="text-amber-100 font-medium text-xs sm:text-sm lg:text-base">Celebrating Success & Excellence</p>
                       </div>
                     </div>
-                    
+
                     {/* Description - Only visible on laptop/PC */}
                     <p className="hidden lg:block text-white/90 text-lg max-w-2xl">
                       Discover remarkable achievements of Anurag students across various fields. Get inspired by their success stories!
                     </p>
-                    
+
                     {/* Achievement Stats - Mobile View */}
                     <div className="flex lg:hidden gap-2 mt-2.5">
                       <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
@@ -5710,12 +5705,12 @@ export default function App() {
                         <div className="text-[9px] sm:text-[10px] text-amber-100 font-medium">Total</div>
                       </div>
                       <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
-                        <div className="text-lg sm:text-xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30*24*60*60*1000)).length}</div>
+                        <div className="text-lg sm:text-xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length}</div>
                         <div className="text-[9px] sm:text-[10px] text-yellow-100 font-medium">This Month</div>
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Achievement Stats - Desktop View */}
                   <div className="hidden lg:flex gap-4">
                     <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
@@ -5723,7 +5718,7 @@ export default function App() {
                       <div className="text-xs text-amber-100 font-medium">Total</div>
                     </div>
                     <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
-                      <div className="text-3xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30*24*60*60*1000)).length}</div>
+                      <div className="text-3xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length}</div>
                       <div className="text-xs text-yellow-100 font-medium">This Month</div>
                     </div>
                   </div>
@@ -5744,8 +5739,8 @@ export default function App() {
             ) : (
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {achievements.map((achievement) => (
-                  <Card 
-                    key={achievement.id} 
+                  <Card
+                    key={achievement.id}
                     className="group hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden border-2 border-transparent hover:border-amber-300"
                     onClick={() => {
                       setSelectedAchievement(achievement)
@@ -5754,8 +5749,8 @@ export default function App() {
                   >
                     {achievement.image_url && (
                       <div className="relative h-48 overflow-hidden">
-                        <img 
-                          src={achievement.image_url} 
+                        <img
+                          src={achievement.image_url}
                           alt={achievement.achievement_title}
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                         />
@@ -5806,21 +5801,21 @@ export default function App() {
 
         {/* Achievement Details Modal */}
         {showAchievementDetails && selectedAchievement && (
-          <div 
+          <div
             className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3 sm:p-4"
             onClick={() => {
               setShowAchievementDetails(false)
               setSelectedAchievement(null)
             }}
           >
-            <div 
+            <div
               className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {selectedAchievement.image_url && (
                 <div className="relative h-64 md:h-80">
-                  <img 
-                    src={selectedAchievement.image_url} 
+                  <img
+                    src={selectedAchievement.image_url}
                     alt={selectedAchievement.achievement_title}
                     className="w-full h-full object-cover"
                   />
@@ -5839,7 +5834,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-              
+
               <div className="p-6 space-y-4">
                 <div>
                   <div className="flex items-center gap-2 mb-2">
@@ -5914,20 +5909,20 @@ export default function App() {
 
         {/* Full Profile Modal - Fully Responsive */}
         {showProfileModal && selectedProfile && (
-          <div 
+          <div
             className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3 sm:p-4"
             onClick={closeProfileView}
           >
-            <div 
+            <div
               className="bg-white rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header with photo */}
               <div className="relative h-52 sm:h-64 md:h-80 bg-gradient-to-br from-pink-200 to-purple-200">
                 {selectedProfile.photo_url ? (
-                  <img 
-                    src={selectedProfile.photo_url} 
-                    alt={selectedProfile.name} 
+                  <img
+                    src={selectedProfile.photo_url}
+                    alt={selectedProfile.name}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -5938,7 +5933,7 @@ export default function App() {
 
                 {/* Gradient overlay for text visibility */}
                 <div className="absolute bottom-0 left-0 right-0 h-24 sm:h-28 md:h-32 bg-gradient-to-t from-black/60 to-transparent"></div>
-                
+
                 {/* Name and basic info overlay */}
                 <div className="absolute bottom-3 sm:bottom-4 md:bottom-6 left-3 sm:left-4 md:left-6 right-3 sm:right-4 md:right-6 text-white">
                   <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold mb-1 sm:mb-2 drop-shadow-lg leading-tight">
@@ -5974,9 +5969,9 @@ export default function App() {
                     </h3>
                     <div className="flex flex-wrap gap-1.5 sm:gap-2">
                       {selectedProfile.interests.map((interest, idx) => (
-                        <Badge 
-                          key={idx} 
-                          variant="secondary" 
+                        <Badge
+                          key={idx}
+                          variant="secondary"
                           className="text-xs sm:text-sm px-2.5 sm:px-3 md:px-4 py-1 sm:py-1.5 md:py-2"
                         >
                           {interest}
@@ -6006,40 +6001,40 @@ export default function App() {
                     </h3>
                     <div className="flex flex-wrap gap-2">
                       {selectedProfile.instagram && (
-                        <a 
+                        <a
                           href={selectedProfile.instagram.startsWith('http') ? selectedProfile.instagram : `https://instagram.com/${selectedProfile.instagram.replace('@', '')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all shadow-md hover:shadow-lg text-xs sm:text-sm"
                         >
                           <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
                           </svg>
                           Instagram
                         </a>
                       )}
                       {selectedProfile.github && (
-                        <a 
+                        <a
                           href={selectedProfile.github.startsWith('http') ? selectedProfile.github : `https://github.com/${selectedProfile.github}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all shadow-md hover:shadow-lg text-xs sm:text-sm"
                         >
                           <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                           </svg>
                           GitHub
                         </a>
                       )}
                       {selectedProfile.linkedin && (
-                        <a 
+                        <a
                           href={selectedProfile.linkedin.startsWith('http') ? selectedProfile.linkedin : `https://linkedin.com/in/${selectedProfile.linkedin}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md hover:shadow-lg text-xs sm:text-sm"
                         >
                           <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
                           </svg>
                           LinkedIn
                         </a>
@@ -6058,7 +6053,7 @@ export default function App() {
                     Close
                   </Button>
                   {likedProfiles.has(selectedProfile.id) ? (
-                    <Button 
+                    <Button
                       disabled
                       className="w-full sm:flex-1 bg-gray-400 cursor-not-allowed text-sm sm:text-base py-2 sm:py-2.5"
                     >
@@ -6066,7 +6061,7 @@ export default function App() {
                       Request Sent
                     </Button>
                   ) : (
-                    <Button 
+                    <Button
                       onClick={async () => {
                         await sendFriendRequest(selectedProfile.id)
                         closeProfileView()
@@ -6257,9 +6252,9 @@ export default function App() {
               {/* Animated Background */}
               <div className="absolute inset-0 opacity-20">
                 <div className="absolute top-0 right-0 w-48 h-48 md:w-96 md:h-96 bg-white rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-0 left-0 w-36 h-36 md:w-72 md:h-72 bg-yellow-300 rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
+                <div className="absolute bottom-0 left-0 w-36 h-36 md:w-72 md:h-72 bg-yellow-300 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
               </div>
-              
+
               <div className="relative z-10">
                 <div className="flex items-center justify-between mb-3 md:mb-6">
                   <div className="flex items-center gap-2 md:gap-4">
@@ -6272,7 +6267,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Compact Instructions for Mobile */}
                 <div className="bg-white/10 backdrop-blur-md rounded-xl md:rounded-2xl p-3 md:p-6 border-2 border-white/30">
                   <h3 className="text-white font-bold text-sm md:text-xl mb-2 md:mb-3">⚡ How It Works:</h3>
@@ -6456,8 +6451,8 @@ export default function App() {
                           <div className="relative mb-4">
                             <div className="w-full aspect-square rounded-2xl overflow-hidden bg-gradient-to-br from-purple-100 to-pink-100">
                               {profile.photo_url ? (
-                                <img 
-                                  src={profile.photo_url} 
+                                <img
+                                  src={profile.photo_url}
                                   alt={profile.name}
                                   className="w-full h-full object-cover"
                                 />
@@ -6475,7 +6470,7 @@ export default function App() {
                           {/* Profile Info */}
                           <h3 className="text-xl font-bold text-gray-800 mb-1">{profile.name}</h3>
                           <p className="text-sm text-gray-500 mb-2">{profile.department} • Year {profile.year}</p>
-                          
+
                           {profile.bio && (
                             <p className="text-sm text-gray-600 mb-4 line-clamp-2">{profile.bio}</p>
                           )}
@@ -6697,7 +6692,7 @@ export default function App() {
                   <h3 className="text-xl font-bold text-gray-800 mb-3">
                     Coming Soon!
                   </h3>
-                  
+
                   {/* How It Works */}
                   <div className="bg-gradient-to-br from-orange-50 to-pink-50 rounded-xl p-4 mb-4 text-left border-2 border-orange-200">
                     <p className="text-sm font-bold text-orange-600 mb-2 text-center">🎲 How Dice Dating Works</p>
@@ -6724,12 +6719,12 @@ export default function App() {
                   <p className="text-gray-700 mb-4 text-sm">
                     Unlocks when we reach <span className="font-bold text-orange-600">50 students or above</span>
                   </p>
-                  
+
                   <div className="bg-gradient-to-r from-orange-100 to-pink-100 rounded-xl p-4 mb-4">
                     <p className="text-sm font-semibold text-gray-800">Current Users</p>
                     <p className="text-3xl font-black text-orange-600">{totalUserCount} / 50</p>
                     <div className="w-full bg-gray-200 rounded-full h-3 mt-3">
-                      <div 
+                      <div
                         className="bg-gradient-to-r from-orange-500 to-pink-600 h-3 rounded-full transition-all duration-500"
                         style={{ width: `${Math.min((totalUserCount / 50) * 100, 100)}%` }}
                       ></div>

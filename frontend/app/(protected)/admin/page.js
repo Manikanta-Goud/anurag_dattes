@@ -16,7 +16,7 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  
+
   // Admin data
   const [stats, setStats] = useState(null)
   const [users, setUsers] = useState([])
@@ -24,23 +24,28 @@ export default function AdminPanel() {
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [conversationMessages, setConversationMessages] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
-  
+
   // Profile and warning modals
   const [selectedUserProfile, setSelectedUserProfile] = useState(null)
   const [showWarningModal, setShowWarningModal] = useState(false)
   const [warningMessage, setWarningMessage] = useState('')
   const [sendingWarning, setSendingWarning] = useState(false)
-  
+
   // Ban user modal
   const [showBanModal, setShowBanModal] = useState(false)
   const [banReason, setBanReason] = useState('')
   const [banningUser, setBanningUser] = useState(false)
-  
+
   // Delete user modal
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
   const [deletingUser, setDeletingUser] = useState(false)
-  
+
+  // Security logs
+  const [securityLogs, setSecurityLogs] = useState([])
+  const [securityLogsLoading, setSecurityLogsLoading] = useState(false)
+  const [topAttackers, setTopAttackers] = useState([])
+
   // Banned users
   const [bannedUsers, setBannedUsers] = useState([])
   const [unbanningUserId, setUnbanningUserId] = useState(null)
@@ -144,6 +149,19 @@ export default function AdminPanel() {
     setPassword('')
   }
 
+  const loadSecurityLogs = async () => {
+    setSecurityLogsLoading(true)
+    try {
+      const res = await fetch('/api/admin/security-logs?limit=200')
+      const data = await res.json()
+      setSecurityLogs(data.logs || [])
+      setTopAttackers(data.topAttackers || [])
+    } catch (err) {
+      console.error('Failed to load security logs:', err)
+    }
+    setSecurityLogsLoading(false)
+  }
+
   const loadAdminData = async () => {
     try {
       // Load stats
@@ -160,7 +178,7 @@ export default function AdminPanel() {
       const convRes = await fetch('/api/admin/conversations')
       const convData = await convRes.json()
       setConversations(convData.conversations)
-      
+
       // Load banned users
       const bannedRes = await fetch('/api/admin/banned-users')
       const bannedData = await bannedRes.json()
@@ -208,7 +226,7 @@ export default function AdminPanel() {
   // Event image upload handlers
   const handleEventImageSelect = async (file) => {
     if (!file) return
-    
+
     // Validate file type
     if (!file.type.startsWith('image/')) {
       toast.error('Please select an image file')
@@ -225,7 +243,7 @@ export default function AdminPanel() {
     const reader = new FileReader()
     reader.onloadend = () => {
       setEventImagePreview(reader.result)
-      setEventForm({...eventForm, image_url: reader.result})
+      setEventForm({ ...eventForm, image_url: reader.result })
     }
     reader.readAsDataURL(file)
   }
@@ -292,7 +310,7 @@ export default function AdminPanel() {
   // Achievement image upload handlers
   const handleAchievementImageSelect = async (file) => {
     if (!file) return
-    
+
     if (!file.type.startsWith('image/')) {
       toast.error('Please select an image file')
       return
@@ -306,7 +324,7 @@ export default function AdminPanel() {
     const reader = new FileReader()
     reader.onloadend = () => {
       setAchievementImagePreview(reader.result)
-      setAchievementForm({...achievementForm, image_url: reader.result})
+      setAchievementForm({ ...achievementForm, image_url: reader.result })
     }
     reader.readAsDataURL(file)
   }
@@ -375,17 +393,17 @@ export default function AdminPanel() {
   }
 
   const handleSaveAchievement = async () => {
-    if (!achievementForm.student_name || !achievementForm.achievement_title || 
-        !achievementForm.description || !achievementForm.achievement_date || !achievementForm.sector) {
+    if (!achievementForm.student_name || !achievementForm.achievement_title ||
+      !achievementForm.description || !achievementForm.achievement_date || !achievementForm.sector) {
       toast.error('Please fill in all required fields')
       return
     }
 
     setSavingAchievement(true)
-    
+
     try {
       let finalImageUrl = achievementForm.image_url
-      
+
       if (achievementForm.image_url && !achievementForm.image_url.startsWith('http')) {
         const uploadedUrl = await uploadAchievementImageToServer(achievementForm.image_url)
         if (!uploadedUrl) {
@@ -398,7 +416,7 @@ export default function AdminPanel() {
 
       // Check if we're editing or creating
       const isEditing = !!editingAchievement
-      
+
       const response = await fetch('/api/achievements', {
         method: isEditing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -423,7 +441,7 @@ export default function AdminPanel() {
       console.error('Error saving achievement:', error)
       toast.error('Error saving achievement')
     }
-    
+
     setSavingAchievement(false)
   }
 
@@ -447,12 +465,12 @@ export default function AdminPanel() {
 
   const handleDeleteAchievement = async (achievementId) => {
     if (!confirm('Are you sure you want to delete this achievement?')) return
-    
+
     try {
       const response = await fetch(`/api/achievements?id=${achievementId}`, {
         method: 'DELETE'
       })
-      
+
       if (response.ok) {
         toast.success('Achievement deleted')
         loadAdminData()
@@ -575,11 +593,11 @@ export default function AdminPanel() {
     }
 
     setUnbanningUserId(userId)
-    
+
     try {
       // Show loading toast
       const loadingToast = toast.loading(`Unbanning ${userName}...`)
-      
+
       const response = await fetch('/api/admin/unban-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -590,10 +608,10 @@ export default function AdminPanel() {
 
       if (response.ok) {
         toast.success(`✅ ${userName} has been unbanned successfully!`, { id: loadingToast })
-        
+
         // Optimistically remove from banned users list immediately
         setBannedUsers(prev => prev.filter(ban => ban.userid !== userId))
-        
+
         // Refresh full data in background
         loadAdminData()
       } else {
@@ -630,7 +648,7 @@ export default function AdminPanel() {
     setDeletingUser(true)
     try {
       const loadingToast = toast.loading(`Deleting ${selectedUserProfile.name}...`)
-      
+
       const response = await fetch('/api/admin/delete-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -644,14 +662,14 @@ export default function AdminPanel() {
 
       if (response.ok) {
         toast.success(`✅ ${selectedUserProfile.name} has been permanently deleted from Supabase and Clerk!`, { id: loadingToast })
-        
+
         // Remove deleted user from state immediately
         setUsers(prevUsers => prevUsers.filter(u => u.id !== selectedUserProfile.id))
-        
+
         closeDeleteModal()
         closeUserProfile()
         closeBanModal()
-        
+
         // Refresh all data to ensure everything is up to date
         setTimeout(() => loadAdminData(), 500)
       } else {
@@ -665,7 +683,7 @@ export default function AdminPanel() {
   }
 
   // Filter users based on search
-  const filteredUsers = (users || []).filter(user => 
+  const filteredUsers = (users || []).filter(user =>
     user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.department?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -709,8 +727,8 @@ export default function AdminPanel() {
                   className="bg-slate-800 border-slate-700 text-white"
                 />
               </div>
-              <Button 
-                type="submit" 
+              <Button
+                type="submit"
                 className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                 disabled={loading}
               >
@@ -809,53 +827,61 @@ export default function AdminPanel() {
         {/* Tabs */}
         <Tabs defaultValue="users" className="w-full">
           {/* Desktop TabsList */}
-          <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-5 mb-8">
+          <TabsList className="hidden md:grid w-full max-w-4xl mx-auto grid-cols-6 mb-8">
             <TabsTrigger value="users">All Users</TabsTrigger>
             <TabsTrigger value="new">New Users</TabsTrigger>
             {/* Conversations tab hidden for privacy */}
             <TabsTrigger value="banned">Banned Users</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
             <TabsTrigger value="achievements">🏅 Achievements</TabsTrigger>
+            <TabsTrigger value="security" onClick={loadSecurityLogs} className="text-red-600 font-bold">🚨 Hackers</TabsTrigger>
           </TabsList>
 
           {/* Mobile TabsList - Zig-Zag Layout */}
           <TabsList className="md:hidden mb-8 px-3 h-auto flex-col gap-2 bg-transparent">
             {/* Row 1 - 3 items */}
             <div className="flex gap-2 justify-center w-full">
-              <TabsTrigger 
+              <TabsTrigger
                 value="users"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-blue-50 to-cyan-50 data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-blue-200 data-[state=active]:border-blue-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
               >
                 All Users
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="new"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-green-50 to-emerald-50 data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-green-200 data-[state=active]:border-green-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
               >
                 New
               </TabsTrigger>
               {/* Conversations tab hidden for privacy */}
-              <TabsTrigger 
+              <TabsTrigger
                 value="banned"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-red-50 to-orange-50 data-[state=active]:from-red-500 data-[state=active]:to-orange-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-red-200 data-[state=active]:border-red-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
               >
                 Banned
               </TabsTrigger>
             </div>
-            
-            {/* Row 2 - 2 items (centered) */}
+
+            {/* Row 2 - 3 items */}
             <div className="flex gap-2 justify-center w-full">
-              <TabsTrigger 
+              <TabsTrigger
                 value="events"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-indigo-50 to-blue-50 data-[state=active]:from-indigo-500 data-[state=active]:to-blue-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-indigo-200 data-[state=active]:border-indigo-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
               >
                 Events
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="achievements"
                 className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-amber-50 to-yellow-50 data-[state=active]:from-amber-500 data-[state=active]:to-yellow-500 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-amber-200 data-[state=active]:border-amber-400 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
               >
                 🏅 Wins
+              </TabsTrigger>
+              <TabsTrigger
+                value="security"
+                onClick={loadSecurityLogs}
+                className="flex-1 max-w-[105px] rounded-full shadow-lg bg-gradient-to-br from-red-50 to-pink-50 data-[state=active]:from-red-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-xl border-2 border-red-300 data-[state=active]:border-red-500 py-3 px-3 text-xs font-bold transition-all duration-300 hover:scale-105"
+              >
+                🚨 Hack
               </TabsTrigger>
             </div>
           </TabsList>
@@ -1079,7 +1105,7 @@ export default function AdminPanel() {
                               <p className="text-xs text-gray-500 mt-1">
                                 {ban.user?.department} • {ban.user?.year} Year
                               </p>
-                              
+
                               {/* Ban Details */}
                               <div className="mt-3 p-3 bg-white rounded border border-red-200">
                                 <div className="text-xs text-gray-500 mb-1">Ban Reason:</div>
@@ -1092,7 +1118,7 @@ export default function AdminPanel() {
                               </div>
                             </div>
                           </div>
-                          
+
                           {/* Unban Button */}
                           <Button
                             onClick={() => unbanUser(ban.userId, ban.user?.name)}
@@ -1169,8 +1195,8 @@ export default function AdminPanel() {
                       <div key={event.id} className="p-4 border-2 border-purple-200 bg-purple-50 rounded-lg">
                         <div className="flex gap-4">
                           {event.image_url && (
-                            <img 
-                              src={event.image_url} 
+                            <img
+                              src={event.image_url}
                               alt={event.title}
                               className="w-32 h-32 object-cover rounded-lg"
                             />
@@ -1182,8 +1208,8 @@ export default function AdminPanel() {
                                   <h3 className="font-bold text-xl text-purple-900">{event.title}</h3>
                                   <Badge className={
                                     event.status === 'upcoming' ? 'bg-blue-500' :
-                                    event.status === 'ongoing' ? 'bg-green-500' :
-                                    'bg-gray-500'
+                                      event.status === 'ongoing' ? 'bg-green-500' :
+                                        'bg-gray-500'
                                   }>
                                     {event.status}
                                   </Badge>
@@ -1248,12 +1274,12 @@ export default function AdminPanel() {
                                 </Button>
                               </div>
                             </div>
-                            
+
                             <div className="grid grid-cols-2 gap-4 mt-4">
                               <div className="flex items-center gap-2 text-sm text-gray-700">
                                 <Calendar className="h-4 w-4 text-purple-600" />
                                 <span>
-                                  {event.end_date 
+                                  {event.end_date
                                     ? `${new Date(event.event_date).toLocaleDateString()} - ${new Date(event.end_date).toLocaleDateString()}`
                                     : new Date(event.event_date).toLocaleDateString()
                                   }
@@ -1353,8 +1379,8 @@ export default function AdminPanel() {
                       {achievements.map((achievement) => (
                         <div key={achievement.id} className="p-4 border-2 border-amber-200 bg-amber-50 rounded-lg">
                           {achievement.image_url && (
-                            <img 
-                              src={achievement.image_url} 
+                            <img
+                              src={achievement.image_url}
                               alt={achievement.achievement_title}
                               className="w-full h-32 object-cover rounded-lg mb-3"
                             />
@@ -1405,16 +1431,158 @@ export default function AdminPanel() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* Security Logs Tab */}
+          <TabsContent value="security">
+            <div className="space-y-6">
+              {/* Header */}
+              <Card className="border-2 border-red-200 bg-gradient-to-br from-red-50 to-white">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-red-700 flex items-center gap-2">
+                        🚨 Security Attack Log
+                      </CardTitle>
+                      <CardDescription>
+                        Every blocked attack attempt is recorded here with the attacker's identity.
+                      </CardDescription>
+                    </div>
+                    <Button
+                      onClick={loadSecurityLogs}
+                      disabled={securityLogsLoading}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      {securityLogsLoading ? '...' : '🔄 Refresh'}
+                    </Button>
+                  </div>
+                </CardHeader>
+              </Card>
+
+              {/* Top Attackers */}
+              {topAttackers.length > 0 && (
+                <Card className="border-2 border-orange-300 bg-orange-50">
+                  <CardHeader>
+                    <CardTitle className="text-orange-700">⚠️ Top Attackers (Most Attempts)</CardTitle>
+                    <CardDescription>These users tried to access others' data the most times</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {topAttackers.map((attacker, i) => (
+                        <div key={attacker.email} className="flex items-center justify-between p-3 bg-white border-2 border-orange-200 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl font-black text-orange-500">#{i + 1}</span>
+                            <div>
+                              <p className="font-bold text-gray-900">{attacker.name || 'Unknown'}</p>
+                              <p className="text-sm text-red-600 font-mono">{attacker.email}</p>
+                              <p className="text-xs text-gray-500">Profile ID: {attacker.profile_id}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-black text-red-600">{attacker.attempts}</p>
+                            <p className="text-xs text-gray-500">attempts</p>
+                            <div className="flex flex-wrap gap-1 mt-1 justify-end">
+                              {attacker.endpoints_targeted.map(ep => (
+                                <Badge key={ep} variant="secondary" className="text-xs">{ep.replace('/api/', '')}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Logs Table */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>📋 All Attack Events ({securityLogs.length})</CardTitle>
+                  <CardDescription>Most recent first. Each row = one blocked hack attempt.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {securityLogsLoading ? (
+                    <p className="text-center text-gray-500 py-8">Loading security logs...</p>
+                  ) : securityLogs.length === 0 ? (
+                    <div className="text-center py-12">
+                      <p className="text-6xl mb-4">🛡️</p>
+                      <p className="text-xl font-bold text-green-700">No attacks detected yet!</p>
+                      <p className="text-gray-500 mt-2">Click 🔄 Refresh to load logs, or no one has tried to hack yet.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {securityLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className={`p-4 rounded-lg border-2 ${log.severity === 'critical' ? 'border-red-500 bg-red-50' :
+                              log.severity === 'high' ? 'border-orange-400 bg-orange-50' :
+                                log.severity === 'medium' ? 'border-yellow-400 bg-yellow-50' :
+                                  'border-gray-300 bg-gray-50'
+                            }`}
+                        >
+                          <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <div className="flex-1 min-w-0">
+                              {/* Event type + severity */}
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <Badge className={`text-xs ${log.severity === 'critical' ? 'bg-red-700' :
+                                    log.severity === 'high' ? 'bg-orange-600' :
+                                      log.severity === 'medium' ? 'bg-yellow-600' : 'bg-gray-500'
+                                  } text-white`}>
+                                  {log.severity?.toUpperCase()}
+                                </Badge>
+                                <span className="text-sm font-bold text-gray-800">{log.event_type}</span>
+                                <code className="text-xs bg-gray-200 px-2 py-0.5 rounded">{log.endpoint}</code>
+                              </div>
+
+                              {/* Attacker info */}
+                              {log.attacker_email ? (
+                                <div className="mb-2 p-2 bg-white rounded border border-gray-200">
+                                  <p className="text-sm font-bold text-red-700">🕵️ Attacker:</p>
+                                  <p className="text-sm"><span className="font-semibold">{log.attacker_name || 'Unknown'}</span> — <span className="text-red-600">{log.attacker_email}</span></p>
+                                  <p className="text-xs text-gray-500 font-mono">Clerk: {log.attacker_clerk_id}</p>
+                                </div>
+                              ) : (
+                                <div className="mb-2 p-2 bg-white rounded border border-gray-200">
+                                  <p className="text-sm text-gray-600">👤 Not logged in (anonymous probe)</p>
+                                </div>
+                              )}
+
+                              {/* Target + Details */}
+                              {log.target_user_id && (
+                                <p className="text-xs text-gray-600">🎯 Tried to steal data of: <code className="bg-gray-200 px-1 rounded">{log.target_user_id}</code></p>
+                              )}
+                              <p className="text-xs text-gray-700 mt-1">{log.details}</p>
+
+                              {/* Network info */}
+                              <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                                <span>🌐 IP: <code>{log.ip_address}</code></span>
+                              </div>
+                            </div>
+
+                            {/* Timestamp */}
+                            <div className="text-right text-xs text-gray-500 whitespace-nowrap">
+                              <p>{new Date(log.created_at).toLocaleDateString()}</p>
+                              <p className="font-mono">{new Date(log.created_at).toLocaleTimeString()}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
         </Tabs>
       </div>
 
       {/* User Profile Modal */}
       {selectedUserProfile && !showWarningModal && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
           onClick={closeUserProfile}
         >
-          <Card 
+          <Card
             className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1540,11 +1708,11 @@ export default function AdminPanel() {
 
       {/* Warning Modal */}
       {showWarningModal && selectedUserProfile && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
           onClick={closeWarningModal}
         >
-          <Card 
+          <Card
             className="w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1645,11 +1813,11 @@ export default function AdminPanel() {
 
       {/* Ban User Modal */}
       {showBanModal && selectedUserProfile && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
           onClick={closeBanModal}
         >
-          <Card 
+          <Card
             className="w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1753,11 +1921,11 @@ export default function AdminPanel() {
 
       {/* Delete User Modal */}
       {showDeleteModal && selectedUserProfile && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
           onClick={closeDeleteModal}
         >
-          <Card 
+          <Card
             className="w-full max-w-lg border-4 border-red-800"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1854,11 +2022,11 @@ export default function AdminPanel() {
 
       {/* Event Creation/Edit Modal */}
       {showEventModal && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
           onClick={() => setShowEventModal(false)}
         >
-          <Card 
+          <Card
             className="w-full max-w-3xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1879,7 +2047,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={eventForm.title}
-                    onChange={(e) => setEventForm({...eventForm, title: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="e.g., Annual Tech Fest 2024"
                     required
@@ -1891,7 +2059,7 @@ export default function AdminPanel() {
                   <label className="text-sm font-semibold text-gray-700">Description *</label>
                   <textarea
                     value={eventForm.description}
-                    onChange={(e) => setEventForm({...eventForm, description: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 min-h-[100px]"
                     placeholder="Describe the event in detail..."
                     required
@@ -1907,7 +2075,7 @@ export default function AdminPanel() {
                         type="radio"
                         name="duration"
                         checked={!eventForm.is_multi_day}
-                        onChange={() => setEventForm({...eventForm, is_multi_day: false, end_date: ''})}
+                        onChange={() => setEventForm({ ...eventForm, is_multi_day: false, end_date: '' })}
                         className="w-4 h-4 text-purple-600"
                       />
                       <span className="text-gray-700">1 Day Event</span>
@@ -1917,7 +2085,7 @@ export default function AdminPanel() {
                         type="radio"
                         name="duration"
                         checked={eventForm.is_multi_day}
-                        onChange={() => setEventForm({...eventForm, is_multi_day: true})}
+                        onChange={() => setEventForm({ ...eventForm, is_multi_day: true })}
                         className="w-4 h-4 text-purple-600"
                       />
                       <span className="text-gray-700">Multi-Day Event</span>
@@ -1933,7 +2101,7 @@ export default function AdminPanel() {
                   <input
                     type="date"
                     value={eventForm.event_date}
-                    onChange={(e) => setEventForm({...eventForm, event_date: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, event_date: e.target.value })}
                     min={new Date().toISOString().split('T')[0]}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     required
@@ -1947,7 +2115,7 @@ export default function AdminPanel() {
                     <input
                       type="date"
                       value={eventForm.end_date}
-                      onChange={(e) => setEventForm({...eventForm, end_date: e.target.value})}
+                      onChange={(e) => setEventForm({ ...eventForm, end_date: e.target.value })}
                       min={eventForm.event_date || new Date().toISOString().split('T')[0]}
                       className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                       required
@@ -1966,7 +2134,7 @@ export default function AdminPanel() {
                   <input
                     type="time"
                     value={eventForm.event_time}
-                    onChange={(e) => setEventForm({...eventForm, event_time: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, event_time: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     required
                   />
@@ -1979,7 +2147,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={eventForm.venue}
-                    onChange={(e) => setEventForm({...eventForm, venue: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, venue: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="e.g., Main Auditorium, Seminar Hall"
                     required
@@ -1992,7 +2160,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={eventForm.club_name}
-                    onChange={(e) => setEventForm({...eventForm, club_name: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, club_name: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="e.g., Tech Club, Cultural Society, Sports Committee"
                   />
@@ -2004,7 +2172,7 @@ export default function AdminPanel() {
                   <label className="text-sm font-semibold text-gray-700">Category *</label>
                   <select
                     value={eventForm.category}
-                    onChange={(e) => setEventForm({...eventForm, category: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                   >
                     <option value="Technical">Technical</option>
@@ -2023,7 +2191,7 @@ export default function AdminPanel() {
                   <input
                     type="number"
                     value={eventForm.max_capacity}
-                    onChange={(e) => setEventForm({...eventForm, max_capacity: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, max_capacity: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="e.g., 200"
                   />
@@ -2035,7 +2203,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={eventForm.organizer}
-                    onChange={(e) => setEventForm({...eventForm, organizer: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, organizer: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="e.g., CSE Department, Tech Club"
                   />
@@ -2047,7 +2215,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={eventForm.guests}
-                    onChange={(e) => setEventForm({...eventForm, guests: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, guests: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="e.g., Dr. John Doe, CEO of TechCorp"
                   />
@@ -2056,7 +2224,7 @@ export default function AdminPanel() {
                 {/* Image Upload with Drag & Drop */}
                 <div className="col-span-2">
                   <label className="text-sm font-semibold text-gray-700 mb-2 block">Event Poster/Image</label>
-                  
+
                   {!eventImagePreview && !eventForm.image_url ? (
                     <div
                       onDrop={handleEventImageDrop}
@@ -2092,7 +2260,7 @@ export default function AdminPanel() {
                         type="button"
                         onClick={() => {
                           setEventImagePreview('')
-                          setEventForm({...eventForm, image_url: ''})
+                          setEventForm({ ...eventForm, image_url: '' })
                         }}
                         className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 shadow-lg"
                       >
@@ -2111,7 +2279,7 @@ export default function AdminPanel() {
                     <input
                       type="checkbox"
                       checked={eventForm.registration_required}
-                      onChange={(e) => setEventForm({...eventForm, registration_required: e.target.checked})}
+                      onChange={(e) => setEventForm({ ...eventForm, registration_required: e.target.checked })}
                       className="w-4 h-4"
                     />
                     <span className="text-sm font-semibold text-gray-700">Registration Required</span>
@@ -2125,7 +2293,7 @@ export default function AdminPanel() {
                     <input
                       type="url"
                       value={eventForm.registration_link}
-                      onChange={(e) => setEventForm({...eventForm, registration_link: e.target.value})}
+                      onChange={(e) => setEventForm({ ...eventForm, registration_link: e.target.value })}
                       className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                       placeholder="https://forms.google.com/..."
                     />
@@ -2138,7 +2306,7 @@ export default function AdminPanel() {
                   <input
                     type="email"
                     value={eventForm.contact_email}
-                    onChange={(e) => setEventForm({...eventForm, contact_email: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, contact_email: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="events@college.edu"
                   />
@@ -2150,7 +2318,7 @@ export default function AdminPanel() {
                   <input
                     type="tel"
                     value={eventForm.contact_phone}
-                    onChange={(e) => setEventForm({...eventForm, contact_phone: e.target.value})}
+                    onChange={(e) => setEventForm({ ...eventForm, contact_phone: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder="+91 1234567890"
                   />
@@ -2197,7 +2365,7 @@ export default function AdminPanel() {
                       }
 
                       const url = editingEvent ? '/api/events/update' : '/api/events/create'
-                      
+
                       // Fix: Convert empty string to null for integer fields
                       const cleanedForm = {
                         ...eventForm,
@@ -2205,8 +2373,8 @@ export default function AdminPanel() {
                         max_capacity: eventForm.max_capacity === '' ? null : parseInt(eventForm.max_capacity),
                         end_date: eventForm.is_multi_day ? eventForm.end_date : null
                       }
-                      
-                      const body = editingEvent 
+
+                      const body = editingEvent
                         ? { ...cleanedForm, eventId: editingEvent.id }
                         : cleanedForm
 
@@ -2285,7 +2453,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={achievementForm.student_name}
-                    onChange={(e) => setAchievementForm({...achievementForm, student_name: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, student_name: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                     placeholder="John Doe"
                   />
@@ -2297,7 +2465,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={achievementForm.achievement_title}
-                    onChange={(e) => setAchievementForm({...achievementForm, achievement_title: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, achievement_title: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                     placeholder="Won National Hackathon"
                   />
@@ -2308,7 +2476,7 @@ export default function AdminPanel() {
                   <label className="text-sm font-semibold text-gray-700">Description *</label>
                   <textarea
                     value={achievementForm.description}
-                    onChange={(e) => setAchievementForm({...achievementForm, description: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, description: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                     rows="3"
                     placeholder="Detailed description of the achievement..."
@@ -2321,7 +2489,7 @@ export default function AdminPanel() {
                   <input
                     type="date"
                     value={achievementForm.achievement_date}
-                    onChange={(e) => setAchievementForm({...achievementForm, achievement_date: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, achievement_date: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
@@ -2331,7 +2499,7 @@ export default function AdminPanel() {
                   <label className="text-sm font-semibold text-gray-700">Department/Sector *</label>
                   <select
                     value={achievementForm.sector}
-                    onChange={(e) => setAchievementForm({...achievementForm, sector: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, sector: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
                     <option value="CSE">CSE</option>
@@ -2351,7 +2519,7 @@ export default function AdminPanel() {
                   <label className="text-sm font-semibold text-gray-700">Achievement Type</label>
                   <select
                     value={achievementForm.achievement_type}
-                    onChange={(e) => setAchievementForm({...achievementForm, achievement_type: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, achievement_type: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
                     <option value="Competition">Competition</option>
@@ -2371,7 +2539,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={achievementForm.position}
-                    onChange={(e) => setAchievementForm({...achievementForm, position: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, position: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                     placeholder="1st Place, Winner, Gold Medal"
                   />
@@ -2383,7 +2551,7 @@ export default function AdminPanel() {
                   <input
                     type="text"
                     value={achievementForm.organization}
-                    onChange={(e) => setAchievementForm({...achievementForm, organization: e.target.value})}
+                    onChange={(e) => setAchievementForm({ ...achievementForm, organization: e.target.value })}
                     className="w-full mt-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                     placeholder="AICTE, IEEE, Government of India, etc."
                   />
@@ -2392,7 +2560,7 @@ export default function AdminPanel() {
                 {/* Image Upload */}
                 <div className="col-span-2">
                   <label className="text-sm font-semibold text-gray-700 mb-2 block">Achievement Photo</label>
-                  
+
                   {!achievementImagePreview ? (
                     <div
                       onDrop={handleAchievementImageDrop}
@@ -2417,15 +2585,15 @@ export default function AdminPanel() {
                     </div>
                   ) : (
                     <div className="relative">
-                      <img 
-                        src={achievementImagePreview} 
+                      <img
+                        src={achievementImagePreview}
                         alt="Preview"
                         className="w-full h-48 object-cover rounded-lg"
                       />
                       <button
                         onClick={() => {
                           setAchievementImagePreview('')
-                          setAchievementForm({...achievementForm, image_url: ''})
+                          setAchievementForm({ ...achievementForm, image_url: '' })
                         }}
                         className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
                       >

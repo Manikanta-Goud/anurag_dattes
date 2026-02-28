@@ -40,6 +40,19 @@ export const loginSchema = z.object({
     password: z.string().min(1, 'Password is required'),
 })
 
+// Valid departments at Anurag University
+const VALID_DEPARTMENTS = [
+    'CSE', 'Computer Science', 'Computer Science and Engineering',
+    'ECE', 'Electronics and Communication Engineering',
+    'EEE', 'Electrical and Electronics Engineering',
+    'ME', 'Mechanical Engineering',
+    'CE', 'Civil Engineering',
+    'IT', 'Information Technology',
+    'AI', 'Artificial Intelligence',
+    'DS', 'Data Science',
+    'CS', 'Cyber Security',
+]
+
 export const updateProfileSchema = z.object({
     userId: z.string().uuid().optional(),
     name: z.string().min(2).max(50).optional(),
@@ -54,7 +67,23 @@ export const updateProfileSchema = z.object({
     interests: z.array(z.string()).optional(),
     hobbies: z.array(z.string()).optional(),
     // Department and Year are now REQUIRED
-    department: z.string().min(2, 'Department is required').max(50, 'Department must be less than 50 characters'),
+    department: z.string()
+        .min(2, 'Department is required')
+        .max(50, 'Department must be less than 50 characters')
+        .refine((val) => {
+            const upper = val.toUpperCase().trim()
+            // Reject 'EG' specifically
+            if (upper === 'EG') {
+                return false
+            }
+            // Reject 'UNKNOWN' or empty values
+            if (upper === 'UNKNOWN' || upper === '') {
+                return false
+            }
+            return true
+        }, {
+            message: 'Invalid department! "EG" is not a valid department. Please enter your actual branch (e.g., CSE, ECE, ME, EEE, IT)',
+        }),
     year: z.number().int().min(1, 'Year must be between 1 and 5').max(5, 'Year must be between 1 and 5'),
     photo_url: z.string().optional(),
     profile_picture: z.string().optional(),
