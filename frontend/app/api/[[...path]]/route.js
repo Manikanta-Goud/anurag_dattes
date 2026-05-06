@@ -1940,6 +1940,13 @@ async function handleSendFriendRequest(request) {
   try {
     const { senderId, receiverId } = await request.json()
 
+    if (senderId === receiverId) {
+      return NextResponse.json(
+        { error: 'You cannot send a friend request to yourself' },
+        { status: 400 }
+      )
+    }
+
     const [matchCheck, requestCheck, blockCheck] = await Promise.all([
       supabaseAdmin
         .from('matches')

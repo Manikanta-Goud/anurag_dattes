@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star, Dices, Trophy, Award } from 'lucide-react'
+import { Heart, MessageCircle, User, LogOut, X, Send, Sparkles, Users, Mail, Bell, AlertTriangle, Search, Eye, UserX, CheckCircle, XCircle, UserPlus, UserMinus, HelpCircle, HeartCrack, Home, Calendar, Clock, MapPin, Star, Dices, Github, Award, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 export default function App() {
   // Clerk authentication
@@ -23,6 +24,7 @@ export default function App() {
   const [view, setView] = useState('landing') // landing, profile-setup, main, profile
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false) // Welcome screen for returning users
   const [mainNav, setMainNav] = useState('home') // home, events, etc. - main navigation sections
+  const [activeEventTab, setActiveEventTab] = useState('upcoming')
   const [profiles, setProfiles] = useState([])
   const [matches, setMatches] = useState([])
   const [selectedMatch, setSelectedMatch] = useState(null)
@@ -72,10 +74,23 @@ export default function App() {
   const [blockedUsers, setBlockedUsers] = useState(new Set())
   const [blockedUsersList, setBlockedUsersList] = useState([]) // Full profile data
 
-  // Achievements state
+  // Projects (GitHub) state
+  const [projects, setProjects] = useState([])
+  const [selectedProject, setSelectedProject] = useState(null)
+  const [showProjectDetails, setShowProjectDetails] = useState(false)
+  const [showAddProjectModal, setShowAddProjectModal] = useState(false)
+
+  // Achievements (Wins) state
   const [achievements, setAchievements] = useState([])
   const [selectedAchievement, setSelectedAchievement] = useState(null)
   const [showAchievementDetails, setShowAchievementDetails] = useState(false)
+  const [newProject, setNewProject] = useState({
+    title: '',
+    description: '',
+    repo_url: '',
+    demo_url: '',
+    tags: ''
+  })
 
   // Leaderboard state
   const [leaderboardData, setLeaderboardData] = useState([])
@@ -163,6 +178,7 @@ export default function App() {
           loadBlockedUsers(data.profile.id)
           loadEvents()
           loadAchievements()
+          loadProjects()
         } else {
           // Profile doesn't exist - pre-fill form with Clerk data
           console.log('❌ No profile found - showing setup page')
@@ -694,15 +710,7 @@ export default function App() {
         // Filter out blocked users
         const filtered = (data.profiles || []).filter(p => !blockedUsers.has(p.id))
 
-        // Prioritize specific profile at the top
-        const priorityEmail = '23eg105j13@anurag.edu.in'
-        const sorted = filtered.sort((a, b) => {
-          if (a.email === priorityEmail) return -1
-          if (b.email === priorityEmail) return 1
-          return 0
-        })
-
-        setProfiles(sorted)
+        setProfiles(filtered)
 
         // Load user's liked profiles to show request status
         const likesResponse = await fetch(`/api/likes?userId=${userId}`)
@@ -749,6 +757,99 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to load events:', error)
+    }
+  }
+  const handleAddProject = async (e) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    try {
+      const isEditing = !!newProject.id;
+      const method = isEditing ? 'PUT' : 'POST';
+      
+      // Optimistic UI Update
+      const optimisticProject = {
+        ...newProject,
+        id: isEditing ? newProject.id : 'temp-' + Date.now(),
+        profile_id: currentUser.id,
+        achievement_title: newProject.title,
+        sector: newProject.tags,
+        student_name: currentUser.name,
+        image_url: currentUser.photo_url || currentUser.profile_picture,
+        profile: currentUser,
+        achievement_date: new Date().toISOString()
+      };
+      
+      if (isEditing) {
+        setProjects(prev => prev.map(p => p.id === newProject.id ? optimisticProject : p));
+      } else {
+        setProjects(prev => [optimisticProject, ...prev]);
+      }
+      
+      setShowAddProjectModal(false);
+      setNewProject({ title: '', description: '', repo_url: '', demo_url: '', tags: '' });
+      
+      const response = await fetch('/api/projects', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newProject,
+          profile_id: currentUser.id
+        })
+      });
+      if (response.ok) {
+        toast.success(`Project ${isEditing ? 'updated' : 'added'} successfully!`);
+        // Sync with actual DB generated IDs
+        loadProjects();
+      } else {
+        toast.error(`Failed to ${isEditing ? 'update' : 'add'} project. Please try again.`);
+        loadProjects(); // Revert
+      }
+    } catch (err) {
+      console.error('Error saving project:', err);
+      toast.error('An error occurred. Please try again.');
+      loadProjects(); // Revert
+    }
+  };
+
+  const handleDeleteProject = async (projectId) => {
+    if (!currentUser) return;
+    if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) return;
+    
+    // Optimistic UI update - instantly remove from screen
+    setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
+    setShowProjectDetails(false);
+    setSelectedProject(null);
+    
+    try {
+      const response = await fetch(`/api/projects?id=${projectId}&profile_id=${currentUser.id}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        toast.success('Project deleted successfully!');
+        // Silently reload to ensure sync with database
+        loadProjects();
+      } else {
+        toast.error('Failed to delete project.');
+        // Revert UI if it failed
+        loadProjects();
+      }
+    } catch (err) {
+      console.error('Error deleting project:', err);
+      toast.error('An error occurred while deleting.');
+      // Revert UI if it failed
+      loadProjects();
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const response = await fetch('/api/projects', { cache: 'no-store' })
+      const data = await response.json()
+      if (response.ok) {
+        setProjects(data.projects || [])
+      }
+    } catch (error) {
+      console.error('Failed to load projects:', error)
     }
   }
 
@@ -2200,7 +2301,7 @@ export default function App() {
   // Landing Page
   if (view === 'landing') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50">
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800">
         <div className="container mx-auto px-4 py-16">
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-16">
@@ -2241,7 +2342,7 @@ export default function App() {
 
               {/* College Email Notice */}
               <div className="mt-4 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-xl p-3 sm:p-4 shadow-md">
-                <p className="text-xs sm:text-sm text-center text-gray-700">
+                <p className="text-xs sm:text-sm text-center text-muted-foreground">
                   <span className="inline-flex items-center gap-1 flex-wrap justify-center">
                     <span className="text-base sm:text-lg">📧</span>
                     <span className="font-semibold">Important:</span>
@@ -2317,7 +2418,7 @@ export default function App() {
   // Profile Setup Page
   if (view === 'profile-setup') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 flex items-center justify-center p-4">
         <Card className="w-full max-w-2xl">
           <CardHeader>
             <CardTitle className="text-center text-3xl">Complete Your Profile</CardTitle>
@@ -2446,7 +2547,7 @@ export default function App() {
                         <User className="h-12 w-12 text-white" />
                         <p className="text-white font-medium">Drop new photo to replace</p>
                         <label className="cursor-pointer">
-                          <div className="px-4 py-2 bg-white text-gray-900 rounded-lg hover:bg-gray-100 transition-colors">
+                          <div className="px-4 py-2 bg-card text-foreground rounded-lg hover:bg-gray-100 transition-colors">
                             Choose Different Photo
                           </div>
                           <input
@@ -2473,7 +2574,7 @@ export default function App() {
                           <User className={`h-16 w-16 ${isDragging ? 'text-pink-500' : 'text-gray-400'}`} />
                         </div>
                         <div>
-                          <p className="text-lg font-semibold text-gray-700 mb-1">
+                          <p className="text-lg font-semibold text-muted-foreground mb-1">
                             {isDragging ? 'Drop your photo here!' : 'Drag and drop your photo'}
                           </p>
                           <p className="text-sm text-gray-500">
@@ -2509,7 +2610,7 @@ export default function App() {
                         <span className="w-full border-t" />
                       </div>
                       <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-white px-2 text-gray-500">Or paste image URL</span>
+                        <span className="bg-card px-2 text-gray-500">Or paste image URL</span>
                       </div>
                     </div>
                     <Input
@@ -2545,9 +2646,9 @@ export default function App() {
   // My Profile Page
   if (view === 'profile') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50">
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800">
         {/* Header */}
-        <div className="bg-white border-b shadow-sm">
+        <div className="bg-background border-b shadow-sm">
           <div className="container mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -2557,6 +2658,7 @@ export default function App() {
                 </h1>
               </div>
               <div className="flex items-center gap-4">
+                <ThemeToggle />
                 <Button onClick={() => setView('main')} variant="outline" size="sm">
                   ← Back to App
                 </Button>
@@ -2857,7 +2959,7 @@ export default function App() {
                               <User className="h-12 w-12 text-white" />
                               <p className="text-white font-medium">Drop new photo to replace</p>
                               <label className="cursor-pointer">
-                                <div className="px-4 py-2 bg-white text-gray-900 rounded-lg hover:bg-gray-100 transition-colors">
+                                <div className="px-4 py-2 bg-card text-foreground rounded-lg hover:bg-gray-100 transition-colors">
                                   Choose Different Photo
                                 </div>
                                 <input
@@ -2923,7 +3025,7 @@ export default function App() {
                               <span className="w-full border-t" />
                             </div>
                             <div className="relative flex justify-center text-xs uppercase">
-                              <span className="bg-white px-2 text-gray-500">Or paste image URL</span>
+                              <span className="bg-card px-2 text-gray-500">Or paste image URL</span>
                             </div>
                           </div>
                           <Input
@@ -3055,7 +3157,7 @@ export default function App() {
 
     return (
       <div
-        className="group relative bg-white rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-500 cursor-pointer transform hover:-translate-y-3 border border-gray-100 hover:border-purple-200"
+        className="group relative bg-card rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-500 cursor-pointer transform hover:-translate-y-3 border border-gray-100 hover:border-purple-200"
         onClick={() => {
           setSelectedEvent(event)
           setShowEventDetails(true)
@@ -3111,7 +3213,7 @@ export default function App() {
         {/* Event Details */}
         <div className="relative p-6 space-y-4">
           <div>
-            <h3 className="text-xl font-black text-gray-900 mb-2 line-clamp-2 group-hover:text-purple-600 transition-colors">
+            <h3 className="text-xl font-black text-foreground mb-2 line-clamp-2 group-hover:text-purple-600 transition-colors">
               {event.title}
             </h3>
             <p className="text-gray-600 text-sm mb-3 line-clamp-2 leading-relaxed">
@@ -3121,14 +3223,14 @@ export default function App() {
 
           {/* Info Grid */}
           <div className="space-y-2.5">
-            <div className="flex items-center gap-3 text-gray-700 bg-blue-50/50 rounded-lg p-2">
+            <div className="flex items-center gap-3 text-muted-foreground bg-blue-50/50 rounded-lg p-2">
               <div className="bg-blue-100 p-2 rounded-lg">
                 <Clock className="h-4 w-4 text-blue-600" />
               </div>
               <span className="text-sm font-semibold">{event.event_time}</span>
             </div>
 
-            <div className="flex items-center gap-3 text-gray-700 bg-red-50/50 rounded-lg p-2">
+            <div className="flex items-center gap-3 text-muted-foreground bg-red-50/50 rounded-lg p-2">
               <div className="bg-red-100 p-2 rounded-lg">
                 <MapPin className="h-4 w-4 text-red-600" />
               </div>
@@ -3172,13 +3274,13 @@ export default function App() {
 
   // Main App
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 overflow-x-hidden">
       {/* Bonus Reward Modal */}
       {showBonusModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
           <div className="bg-gradient-to-br from-yellow-50 via-orange-50 to-red-50 rounded-3xl shadow-2xl max-w-md w-full p-8 border-4 border-yellow-400 animate-in zoom-in duration-500">
             <div className="text-center space-y-6">
-              {/* Animated Trophy */}
+              {/* Animated Github */}
               <div className="relative">
                 <div className="text-8xl animate-bounce">🎁</div>
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -3190,7 +3292,7 @@ export default function App() {
                 <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-red-600 mb-2">
                   BONUS REWARD!
                 </h2>
-                <p className="text-lg font-bold text-gray-800 mb-1">
+                <p className="text-lg font-bold text-foreground mb-1">
                   You got 3 FREE likes! 💎
                 </p>
                 <p className="text-sm text-orange-700 font-semibold">
@@ -3223,7 +3325,7 @@ export default function App() {
 
                   <button
                     onClick={() => setShowBonusModal(false)}
-                    className="text-sm text-gray-600 hover:text-gray-800 underline"
+                    className="text-sm text-gray-600 hover:text-foreground underline"
                   >
                     Maybe later (expires in {Math.floor((bonusExpiry - new Date()) / 60000)} min)
                   </button>
@@ -3245,7 +3347,7 @@ export default function App() {
       )}
 
       {/* Header */}
-      <div className="bg-white border-b shadow-sm">
+      <div className="bg-background border-b shadow-sm">
         <div className="container mx-auto px-4 py-3 md:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -3255,6 +3357,8 @@ export default function App() {
               </h1>
             </div>
             <div className="flex items-center gap-1 md:gap-3">
+              <ThemeToggle />
+              
               {/* Help Button */}
               <button
                 onClick={() => setShowHelpModal(true)}
@@ -3299,7 +3403,7 @@ export default function App() {
       {/* Help Modal - Fully Responsive */}
       {showHelpModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4" onClick={() => setShowHelpModal(false)}>
-          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-md w-full animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-card rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-md w-full animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-4 sm:p-5 md:p-6 rounded-t-2xl sm:rounded-t-3xl text-white">
               <div className="flex items-center justify-between mb-2 sm:mb-4">
@@ -3322,7 +3426,7 @@ export default function App() {
             {/* Content */}
             <div className="p-4 sm:p-5 md:p-6 space-y-3 sm:space-y-4">
               <div className="text-center space-y-2 sm:space-y-3">
-                <p className="text-gray-700 font-medium text-xs sm:text-sm md:text-base px-2">
+                <p className="text-muted-foreground font-medium text-xs sm:text-sm md:text-base px-2">
                   📱 For any queries, DM me on Instagram
                 </p>
 
@@ -3350,13 +3454,13 @@ export default function App() {
       {/* Notifications Modal - Fully Responsive */}
       {showNotifications && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4" onClick={() => setShowNotifications(false)}>
-          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-card rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="flex-shrink-0 p-3 sm:p-4 md:p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50 sticky top-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 sm:gap-3">
                   <Bell className="h-5 w-5 sm:h-6 sm:w-6 text-purple-600 flex-shrink-0" />
-                  <h3 className="text-base sm:text-lg md:text-xl lg:text-2xl font-bold text-gray-800">Notifications</h3>
+                  <h3 className="text-base sm:text-lg md:text-xl lg:text-2xl font-bold text-foreground">Notifications</h3>
                 </div>
                 <button
                   onClick={() => setShowNotifications(false)}
@@ -3425,7 +3529,7 @@ export default function App() {
                           </Avatar>
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xl font-bold text-purple-900">{request.name}</h4>
-                            <p className="text-sm text-gray-700">{request.department} • Year {request.year}</p>
+                            <p className="text-sm text-muted-foreground">{request.department} • Year {request.year}</p>
                             <p className="text-xs text-gray-600 mt-1">
                               📅 Sent {new Date(request.requestedAt).toLocaleDateString()}
                             </p>
@@ -3437,7 +3541,7 @@ export default function App() {
                         {/* Bio */}
                         {request.bio && (
                           <div>
-                            <p className="text-sm text-gray-700 line-clamp-2">{request.bio}</p>
+                            <p className="text-sm text-muted-foreground line-clamp-2">{request.bio}</p>
                           </div>
                         )}
 
@@ -3527,7 +3631,7 @@ export default function App() {
                               Warning from Admin
                             </span>
                           </div>
-                          <p className="text-sm text-gray-900 leading-relaxed mb-2">
+                          <p className="text-sm text-foreground leading-relaxed mb-2">
                             {warning.message}
                           </p>
                           <div className="flex items-center justify-between">
@@ -3553,7 +3657,7 @@ export default function App() {
                       onClick={() => {
                         warnings.forEach(w => markWarningAsRead(w.id))
                       }}
-                      className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                      className="text-sm font-medium text-gray-600 hover:text-foreground transition-colors"
                     >
                       Clear all warnings
                     </button>
@@ -3570,7 +3674,7 @@ export default function App() {
         {/* Welcome Screen Overlay - Fully Responsive for ALL Devices */}
         {showWelcomeScreen && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-y-auto">
-            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-md md:max-w-lg w-full my-auto animate-in fade-in zoom-in duration-300">
+            <div className="bg-card rounded-2xl sm:rounded-3xl shadow-2xl max-w-[95vw] sm:max-w-md md:max-w-lg w-full my-auto animate-in fade-in zoom-in duration-300">
               {/* Header */}
               <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-4 sm:p-6 md:p-8 rounded-t-2xl sm:rounded-t-3xl text-white text-center">
                 <div className="flex justify-center mb-3 sm:mb-4">
@@ -3592,7 +3696,7 @@ export default function App() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="font-bold text-purple-900 mb-1 sm:mb-2 text-sm sm:text-base md:text-lg leading-tight">Start Making Connections!</h3>
-                      <p className="text-xs sm:text-sm text-gray-700 leading-relaxed">
+                      <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
                         Find friends, make connections, and build meaningful relationships.
                         Be respectful and enjoy your experience! 💖
                       </p>
@@ -3607,7 +3711,7 @@ export default function App() {
                       <Mail className="h-4 w-4 sm:h-5 sm:w-5 text-pink-600 flex-shrink-0" />
                       <h3 className="font-bold text-pink-900 text-xs sm:text-sm md:text-base leading-tight">Need Help? Contact Me!</h3>
                     </div>
-                    <p className="text-[10px] sm:text-xs text-gray-700 px-2">
+                    <p className="text-[10px] sm:text-xs text-muted-foreground px-2">
                       📱 For any queries or support, DM me on Instagram
                     </p>
 
@@ -3658,7 +3762,7 @@ export default function App() {
                   }}
                   className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'home'
                     ? 'bg-gradient-to-r from-pink-500 via-purple-500 to-pink-600 text-white shadow-xl shadow-pink-300/50 scale-105'
-                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-pink-100 hover:to-purple-100 shadow-md hover:shadow-lg border-2 border-purple-200'
+                    : 'bg-card text-muted-foreground hover:bg-gradient-to-r hover:from-pink-100 hover:to-purple-100 shadow-md hover:shadow-lg border-2 border-purple-200'
                     }`}
                 >
                   <Home className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'home' ? 'animate-pulse' : ''}`} />
@@ -3678,23 +3782,25 @@ export default function App() {
                   onClick={() => setMainNav('events')}
                   className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'events'
                     ? 'bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-600 text-white shadow-xl shadow-blue-300/50 scale-105'
-                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 shadow-md hover:shadow-lg border-2 border-blue-200'
+                    : 'bg-card text-muted-foreground hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 shadow-md hover:shadow-lg border-2 border-blue-200'
                     }`}
                 >
                   <Calendar className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'events' ? 'animate-pulse' : ''}`} />
                   <span className="hidden sm:inline">Events</span>
                 </button>
 
-                {/* Achievements Button */}
+                {/* Github Button */}
                 <button
-                  onClick={() => setMainNav('achievements')}
-                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'achievements'
+                  onClick={() => {
+                    setMainNav('github');
+                  }}
+                  className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'github'
                     ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-orange-600 text-white shadow-xl shadow-amber-300/50 scale-105'
-                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-amber-100 hover:to-yellow-100 shadow-md hover:shadow-lg border-2 border-amber-200'
+                    : 'bg-card text-muted-foreground hover:bg-gradient-to-r hover:from-amber-100 hover:to-yellow-100 shadow-md hover:shadow-lg border-2 border-amber-200'
                     }`}
                 >
-                  <Trophy className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'achievements' ? 'animate-bounce' : ''}`} />
-                  <span className="hidden sm:inline">🏅 Wins</span>
+                  <Github className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'github' ? 'animate-bounce' : ''}`} />
+                  <span className="hidden sm:inline">GitHub</span>
                 </button>
 
                 {/* 🎲 FOMO Dice Button - NEW */}
@@ -3708,7 +3814,7 @@ export default function App() {
                   }}
                   className={`relative flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-2xl font-bold text-sm md:text-base transition-all duration-300 transform hover:scale-105 active:scale-95 ${mainNav === 'dice'
                     ? 'bg-gradient-to-r from-orange-500 via-red-500 to-pink-600 text-white shadow-xl shadow-orange-300/50 scale-105'
-                    : 'bg-white text-gray-700 hover:bg-gradient-to-r hover:from-orange-100 hover:to-pink-100 shadow-md hover:shadow-lg border-2 border-orange-200'
+                    : 'bg-card text-muted-foreground hover:bg-gradient-to-r hover:from-orange-100 hover:to-pink-100 shadow-md hover:shadow-lg border-2 border-orange-200'
                     }`}
                 >
                   <Dices className={`h-5 w-5 md:h-6 md:w-6 transition-transform duration-300 ${mainNav === 'dice' ? 'animate-bounce' : ''}`} />
@@ -3741,7 +3847,7 @@ export default function App() {
             }}
           >
             {/* Desktop TabsList - Premium Grid with Animations */}
-            <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-5 mb-8 bg-white shadow-lg rounded-2xl p-2 border-2 border-purple-100 gap-2">
+            <TabsList className="hidden md:grid w-full max-w-3xl mx-auto grid-cols-5 mb-8 bg-card shadow-lg rounded-2xl p-2 border-2 border-purple-100 gap-2">
               <TabsTrigger
                 value="discover"
                 className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-pink-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-pink-300/50 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-md"
@@ -3855,7 +3961,7 @@ export default function App() {
                           <Heart className="h-20 w-20 mx-auto text-pink-400 animate-bounce" />
                           <div className="absolute inset-0 bg-pink-400/30 blur-2xl animate-pulse"></div>
                         </div>
-                        <p className="text-2xl font-bold mb-2 text-gray-800">No more profiles to show</p>
+                        <p className="text-2xl font-bold mb-2 text-foreground">No more profiles to show</p>
                         <p className="text-base mt-2 mb-6 text-gray-600">Check back later for new students!</p>
                         <Button
                           onClick={() => setCurrentProfileIndex(0)}
@@ -3965,7 +4071,7 @@ export default function App() {
                             {/* Bio Preview */}
                             {profiles[currentProfileIndex].bio && (
                               <div className="mb-4 p-4 backdrop-blur-sm bg-white/60 rounded-2xl border border-white/50 shadow-md">
-                                <p className="text-gray-800 text-sm line-clamp-3 leading-relaxed font-medium">
+                                <p className="text-foreground text-sm line-clamp-3 leading-relaxed font-medium">
                                   💭 {profiles[currentProfileIndex].bio}
                                 </p>
                               </div>
@@ -4031,7 +4137,7 @@ export default function App() {
                     {/* Keyboard shortcuts hint with modern style */}
                     <div className="text-center mt-6">
                       <div className="inline-block backdrop-blur-md bg-white/70 px-6 py-3 rounded-full border border-white/50 shadow-lg">
-                        <p className="text-xs text-gray-700 font-semibold flex items-center gap-2">
+                        <p className="text-xs text-muted-foreground font-semibold flex items-center gap-2">
                           <Sparkles className="h-4 w-4 text-purple-500" />
                           Use ← → arrow keys or swipe on mobile
                           <Sparkles className="h-4 w-4 text-pink-500" />
@@ -4049,7 +4155,7 @@ export default function App() {
                   onClick={closeProfileView}
                 >
                   <div
-                    className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+                    className="bg-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* Header with photo */}
@@ -4087,18 +4193,18 @@ export default function App() {
                       {/* Bio */}
                       {selectedProfile.bio && (
                         <div>
-                          <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-foreground mb-2 flex items-center gap-2">
                             <span className="text-2xl">💭</span>
                             About
                           </h3>
-                          <p className="text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
+                          <p className="text-muted-foreground leading-relaxed">{selectedProfile.bio}</p>
                         </div>
                       )}
 
                       {/* Interests */}
                       {selectedProfile.interests && selectedProfile.interests.length > 0 && (
                         <div>
-                          <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
                             <span className="text-2xl">🎯</span>
                             Interests
                           </h3>
@@ -4119,11 +4225,11 @@ export default function App() {
                       {/* Email */}
                       {selectedProfile.email && (
                         <div>
-                          <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-foreground mb-2 flex items-center gap-2">
                             <span className="text-2xl">📧</span>
                             Contact
                           </h3>
-                          <div className="flex items-center gap-2 text-gray-700">
+                          <div className="flex items-center gap-2 text-muted-foreground">
                             <Mail className="h-5 w-5" />
                             <span>{selectedProfile.email}</span>
                           </div>
@@ -4133,7 +4239,7 @@ export default function App() {
                       {/* Social Media Links */}
                       {(selectedProfile.instagram || selectedProfile.github || selectedProfile.linkedin) && (
                         <div>
-                          <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
                             <span className="text-2xl">🔗</span>
                             Connect
                           </h3>
@@ -4334,7 +4440,7 @@ export default function App() {
                                   {/* Name and Badge - Enhanced badges */}
                                   <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                                     <h3 className={`font-bold ${rank === 1 ? 'text-sm md:text-2xl' : rank === 2 || rank === 3 ? 'text-sm md:text-xl' : 'text-xs md:text-lg'
-                                      } text-gray-900`}>
+                                      } text-foreground`}>
                                       {profile.name}
                                     </h3>
                                     {badge && (
@@ -4425,7 +4531,7 @@ export default function App() {
 
                 {/* Motivational Message */}
                 <div className="mt-12 text-center p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl">
-                  <p className="text-lg font-semibold text-gray-700 mb-2">
+                  <p className="text-lg font-semibold text-muted-foreground mb-2">
                     Want to be on the leaderboard? 🚀
                   </p>
                   <p className="text-sm text-gray-600">
@@ -4541,7 +4647,7 @@ export default function App() {
                                     {profile.name?.charAt(0) || 'U'}
                                   </AvatarFallback>
                                 </Avatar>
-                                <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 shadow-lg">
+                                <div className="absolute -bottom-2 -right-2 bg-card rounded-full p-1 shadow-lg">
                                   <Eye className="h-4 w-4 text-purple-600" />
                                 </div>
                               </div>
@@ -4559,7 +4665,7 @@ export default function App() {
                                     {profile.department} • {profile.year} Year
                                   </p>
                                   {profile.bio && (
-                                    <p className="text-gray-700 mt-3 line-clamp-2">{profile.bio}</p>
+                                    <p className="text-muted-foreground mt-3 line-clamp-2">{profile.bio}</p>
                                   )}
                                   {profile.interests && profile.interests.length > 0 && (
                                     <div className="flex flex-wrap gap-2 mt-3">
@@ -4647,7 +4753,7 @@ export default function App() {
 
                               {/* Bio */}
                               {profile.bio && (
-                                <p className="text-sm text-gray-700 leading-relaxed line-clamp-3">{profile.bio}</p>
+                                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">{profile.bio}</p>
                               )}
 
                               {/* Interests */}
@@ -4720,7 +4826,7 @@ export default function App() {
               <div className="max-w-6xl mx-auto">
                 {/* Mobile Full-Page Chat View */}
                 {isMobileChatOpen && selectedMatch ? (
-                  <div className="fixed inset-0 bg-white z-50 flex flex-col md:hidden">
+                  <div className="fixed inset-0 bg-card z-50 flex flex-col md:hidden">
                     {/* Chat Header */}
                     <div className="bg-gradient-to-r from-pink-500 to-purple-500 text-white p-4 shadow-lg">
                       <div className="flex items-center gap-3">
@@ -4837,7 +4943,7 @@ export default function App() {
                       <div className="flex-1 flex items-center justify-center p-6 bg-gray-50">
                         <div className="text-center max-w-sm">
                           <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
-                          <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                          <h3 className="text-2xl font-bold text-foreground mb-2">
                             Can't Chat
                           </h3>
                           <p className="text-gray-600">
@@ -4903,7 +5009,7 @@ export default function App() {
                                     {/* Date Separator */}
                                     {showDateSeparator && (
                                       <div className="flex items-center justify-center my-4">
-                                        <div className="bg-white shadow-sm text-gray-600 text-xs font-medium px-4 py-1.5 rounded-full border border-gray-200">
+                                        <div className="bg-card shadow-sm text-gray-600 text-xs font-medium px-4 py-1.5 rounded-full border border-gray-200">
                                           {formatMessageDate(msg.createdAt)}
                                         </div>
                                       </div>
@@ -4933,7 +5039,7 @@ export default function App() {
                                         <div
                                           className={`rounded-2xl px-4 py-2.5 ${isCurrentUser
                                             ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white'
-                                            : 'bg-white text-gray-900 shadow-sm'
+                                            : 'bg-card text-foreground shadow-sm'
                                             }`}
                                         >
                                           <p className="break-words text-sm leading-relaxed">{msg.message}</p>
@@ -4950,7 +5056,7 @@ export default function App() {
                             )}
                             {isTyping && (
                               <div className="flex justify-start">
-                                <div className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                                <div className="bg-card rounded-2xl px-4 py-3 shadow-sm">
                                   <div className="flex gap-1">
                                     <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
                                     <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
@@ -4963,7 +5069,7 @@ export default function App() {
                         </div>
 
                         {/* Message Input */}
-                        <div className="border-t bg-white p-4 shadow-lg">
+                        <div className="border-t bg-card p-4 shadow-lg">
                           <form onSubmit={handleSendMessage} className="flex gap-2">
                             <Input
                               type="text"
@@ -5196,7 +5302,7 @@ export default function App() {
                                   <div className="text-center max-w-md">
                                     <div className="mb-6">
                                       <UserX className="h-20 w-20 mx-auto text-red-400 mb-4" />
-                                      <h3 className="text-2xl font-bold text-gray-800 mb-2">
+                                      <h3 className="text-2xl font-bold text-foreground mb-2">
                                         You Can't Chat Anymore
                                       </h3>
                                       <p className="text-gray-600 leading-relaxed">
@@ -5302,7 +5408,7 @@ export default function App() {
                                                   <div
                                                     className={`max-w-[70%] rounded-2xl px-4 py-2 ${isCurrentUser
                                                       ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white'
-                                                      : 'bg-gray-200 text-gray-900'
+                                                      : 'bg-gray-200 text-foreground'
                                                       }`}
                                                   >
                                                     <p className="break-words">{msg.message}</p>
@@ -5408,7 +5514,7 @@ export default function App() {
 
                             {/* Profile Info */}
                             <div className="flex-1">
-                              <h3 className="text-2xl font-bold mb-1 text-gray-900">
+                              <h3 className="text-2xl font-bold mb-1 text-foreground">
                                 {user.name}
                               </h3>
                               <div className="space-y-1 text-sm text-gray-600">
@@ -5473,13 +5579,26 @@ export default function App() {
 
         {/* Events Section */}
         {mainNav === 'events' && (
-          <div className="space-y-8 animate-fade-in">
+          <Tabs defaultValue="events_list" className="w-full animate-fade-in space-y-6">
+            <div className="flex justify-center mt-2 mb-6">
+              <TabsList className="bg-white/80 backdrop-blur-xl border border-gray-100 shadow-lg rounded-2xl p-1">
+                <TabsTrigger value="events_list" className="data-[state=active]:bg-indigo-500 data-[state=active]:text-white rounded-xl px-6 py-2.5 font-bold transition-all">
+                  <Calendar className="w-4 h-4 mr-2" /> Campus Events
+                </TabsTrigger>
+                <TabsTrigger value="wins_list" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white rounded-xl px-6 py-2.5 font-bold transition-all">
+                  <Award className="w-4 h-4 mr-2" /> Student Wins
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="events_list" className="mt-0">
+              <div className="space-y-8">
             {/* Compact Events Header - Mobile Optimized */}
             <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 rounded-2xl lg:rounded-3xl p-4 sm:p-5 lg:p-8 shadow-lg lg:shadow-2xl">
               {/* Animated Background Pattern */}
               <div className="absolute inset-0 opacity-10">
-                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-white rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-card rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-card rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
               </div>
 
               <div className="relative z-10">
@@ -5537,7 +5656,7 @@ export default function App() {
             </div>
 
             {/* Premium Filter Tabs */}
-            <Tabs defaultValue="upcoming" className="w-full">
+            <Tabs value={activeEventTab} onValueChange={setActiveEventTab} className="w-full">
               <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg p-2 border border-gray-100">
                 <TabsList className="grid w-full grid-cols-4 bg-gradient-to-r from-gray-50 to-gray-100 p-1 rounded-xl gap-2">
                   <TabsTrigger
@@ -5587,7 +5706,7 @@ export default function App() {
                       <div className="absolute inset-0 bg-blue-400 blur-2xl opacity-20 animate-pulse"></div>
                       <Calendar className="relative h-20 w-20 mx-auto text-blue-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Upcoming Events</h3>
+                    <h3 className="text-xl font-bold text-muted-foreground mb-2">No Upcoming Events</h3>
                     <p className="text-gray-500">Check back soon for exciting campus events!</p>
                   </div>
                 ) : (
@@ -5610,7 +5729,7 @@ export default function App() {
                         <Calendar className="relative h-20 w-20 mx-auto text-green-400" />
                       </div>
                     </div>
-                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Live Events</h3>
+                    <h3 className="text-xl font-bold text-muted-foreground mb-2">No Live Events</h3>
                     <p className="text-gray-500">No events happening right now</p>
                   </div>
                 ) : (
@@ -5630,7 +5749,7 @@ export default function App() {
                       <div className="absolute inset-0 bg-gray-400 blur-2xl opacity-20"></div>
                       <Calendar className="relative h-20 w-20 mx-auto text-gray-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Past Events</h3>
+                    <h3 className="text-xl font-bold text-muted-foreground mb-2">No Past Events</h3>
                     <p className="text-gray-500">Completed events will appear here</p>
                   </div>
                 ) : (
@@ -5650,7 +5769,7 @@ export default function App() {
                       <div className="absolute inset-0 bg-purple-400 blur-2xl opacity-20 animate-pulse"></div>
                       <Calendar className="relative h-20 w-20 mx-auto text-purple-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-gray-700 mb-2">No Events Yet</h3>
+                    <h3 className="text-xl font-bold text-muted-foreground mb-2">No Events Yet</h3>
                     <p className="text-gray-500 mb-4">Be the first to know when events are posted!</p>
                     <div className="flex items-center justify-center gap-2 text-purple-600">
                       <Bell className="h-5 w-5" />
@@ -5667,17 +5786,15 @@ export default function App() {
               </TabsContent>
             </Tabs>
           </div>
-        )}
+        </TabsContent>
 
-        {/* Achievements Section */}
-        {mainNav === 'achievements' && (
+        <TabsContent value="wins_list" className="mt-0">
           <div className="space-y-8 animate-fade-in">
-            {/* Achievements Header */}
+            {/* Original Achievements Header */}
             <div className="relative overflow-hidden bg-gradient-to-br from-amber-600 via-yellow-600 to-orange-600 rounded-2xl lg:rounded-3xl p-4 sm:p-5 lg:p-8 shadow-lg lg:shadow-2xl">
-              {/* Animated Background Pattern */}
               <div className="absolute inset-0 opacity-10">
-                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-white rounded-full blur-3xl animate-pulse"></div>
-                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-white rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-card rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-card rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
               </div>
 
               <div className="relative z-10">
@@ -5685,41 +5802,30 @@ export default function App() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 sm:gap-3 mb-2 lg:mb-3">
                       <div className="bg-white/20 backdrop-blur-sm p-1.5 sm:p-2 lg:p-3 rounded-lg lg:rounded-2xl">
-                        <Trophy className="h-5 w-5 sm:h-6 sm:w-6 lg:h-8 lg:w-8 text-white" />
+                        <Award className="h-5 w-5 sm:h-6 sm:w-6 lg:h-8 lg:w-8 text-white" />
                       </div>
                       <div>
-                        <h2 className="text-lg sm:text-xl lg:text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">Student Achievements</h2>
-                        <p className="text-amber-100 font-medium text-xs sm:text-sm lg:text-base">Celebrating Success & Excellence</p>
+                        <h2 className="text-lg sm:text-xl lg:text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">Student Wins</h2>
+                        <p className="text-amber-100 font-medium text-xs sm:text-sm lg:text-base">Celebrating Success & Achievements</p>
                       </div>
                     </div>
 
-                    {/* Description - Only visible on laptop/PC */}
                     <p className="hidden lg:block text-white/90 text-lg max-w-2xl">
-                      Discover remarkable achievements of Anurag students across various fields. Get inspired by their success stories!
+                      Explore the incredible achievements of our community members. Let's celebrate our wins together!
                     </p>
 
-                    {/* Achievement Stats - Mobile View */}
                     <div className="flex lg:hidden gap-2 mt-2.5">
                       <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
                         <div className="text-lg sm:text-xl font-bold text-white">{achievements.length}</div>
                         <div className="text-[9px] sm:text-[10px] text-amber-100 font-medium">Total</div>
                       </div>
-                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
-                        <div className="text-lg sm:text-xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length}</div>
-                        <div className="text-[9px] sm:text-[10px] text-yellow-100 font-medium">This Month</div>
-                      </div>
                     </div>
                   </div>
 
-                  {/* Achievement Stats - Desktop View */}
                   <div className="hidden lg:flex gap-4">
                     <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
                       <div className="text-3xl font-bold text-white">{achievements.length}</div>
-                      <div className="text-xs text-amber-100 font-medium">Total</div>
-                    </div>
-                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
-                      <div className="text-3xl font-bold text-white">{achievements.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length}</div>
-                      <div className="text-xs text-yellow-100 font-medium">This Month</div>
+                      <div className="text-xs text-amber-100 font-medium">Total Wins</div>
                     </div>
                   </div>
                 </div>
@@ -5731,9 +5837,9 @@ export default function App() {
               <div className="text-center py-20 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-2xl border-2 border-dashed border-amber-200">
                 <div className="relative inline-block mb-6">
                   <div className="absolute inset-0 bg-amber-400 blur-2xl opacity-20 animate-pulse"></div>
-                  <Trophy className="relative h-20 w-20 mx-auto text-amber-400" />
+                  <Award className="relative h-20 w-20 mx-auto text-amber-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-700 mb-2">No Achievements Yet</h3>
+                <h3 className="text-xl font-bold text-muted-foreground mb-2">No Wins Yet</h3>
                 <p className="text-gray-500 mb-4">Student achievements will be showcased here!</p>
               </div>
             ) : (
@@ -5797,6 +5903,151 @@ export default function App() {
               </div>
             )}
           </div>
+        </TabsContent>
+      </Tabs>
+    )}
+
+    {/* GitHub / Projects Section */}
+    {mainNav === 'github' && (
+      <div className="space-y-8 animate-fade-in">
+        {/* Projects Header */}
+                  <div className="relative overflow-hidden bg-gradient-to-br from-amber-600 via-yellow-600 to-orange-600 rounded-2xl lg:rounded-3xl p-4 sm:p-5 lg:p-8 shadow-lg lg:shadow-2xl">
+              {/* Animated Background Pattern */}
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute top-0 left-0 w-40 h-40 lg:w-72 lg:h-72 bg-card rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute bottom-0 right-0 w-48 h-48 lg:w-96 lg:h-96 bg-card rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+              </div>
+
+              <div className="relative z-10">
+                <div className="flex items-start justify-between lg:mb-6">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-2 lg:mb-3">
+                      <div className="bg-white/20 backdrop-blur-sm p-1.5 sm:p-2 lg:p-3 rounded-lg lg:rounded-2xl">
+                        <Github className="h-5 w-5 sm:h-6 sm:w-6 lg:h-8 lg:w-8 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg sm:text-xl lg:text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">Student Projects</h2>
+                        <p className="text-amber-100 font-medium text-xs sm:text-sm lg:text-base">Showcasing Innovation & Code</p>
+                      </div>
+                    </div>
+
+                    {/* Description - Only visible on laptop/PC */}
+                    <p className="hidden lg:block text-white/90 text-lg max-w-2xl">
+                      Explore repositories and projects built by our community across various fields. Get inspired by their success stories!
+                    </p>
+
+                    {/* Achievement Stats - Mobile View */}
+                    <div className="flex lg:hidden gap-2 mt-2.5">
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{projects.length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-amber-100 font-medium">Total</div>
+                      </div>
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center flex-1">
+                        <div className="text-lg sm:text-xl font-bold text-white">{projects.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length}</div>
+                        <div className="text-[9px] sm:text-[10px] text-yellow-100 font-medium">This Month</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Achievement Stats - Desktop View */}
+                  <div className="hidden lg:flex gap-4">
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{projects.length}</div>
+                      <div className="text-xs text-amber-100 font-medium">Total</div>
+                    </div>
+                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 text-center min-w-[100px]">
+                      <div className="text-3xl font-bold text-white">{projects.filter(a => new Date(a.achievement_date) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).length}</div>
+                      <div className="text-xs text-yellow-100 font-medium">This Month</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex justify-start lg:justify-end mt-6">
+                  <Button 
+                    onClick={() => {
+                      setNewProject({ title: '', description: '', repo_url: '', demo_url: '', tags: '' });
+                      setShowAddProjectModal(true);
+                    }}
+                    className="bg-white text-orange-600 hover:bg-orange-50 font-bold px-6 py-6 rounded-full shadow-lg border-2 border-transparent hover:border-orange-200 transition-all transform hover:scale-105 group"
+                  >
+                    <Plus className="h-5 w-5 mr-2 group-hover:rotate-90 transition-transform duration-300" /> 
+                    Submit Repository
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Achievements Grid */}
+            {projects.length === 0 ? (
+              <div className="text-center py-20 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-2xl border-2 border-dashed border-amber-200">
+                <div className="relative inline-block mb-6">
+                  <div className="absolute inset-0 bg-amber-400 blur-2xl opacity-20 animate-pulse"></div>
+                  <Github className="relative h-20 w-20 mx-auto text-amber-400" />
+                </div>
+                <h3 className="text-xl font-bold text-muted-foreground mb-2">No Achievements Yet</h3>
+                <p className="text-gray-500 mb-4">Student projects will be showcased here!</p>
+              </div>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {projects.map((achievement) => (
+                  <Card
+                    key={achievement.id}
+                    className="group hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden border-2 border-transparent hover:border-amber-300"
+                    onClick={() => {
+                      setSelectedProject(achievement)
+                      setShowProjectDetails(true)
+                    }}
+                  >
+                    {achievement.image_url && (
+                      <div className="relative h-48 overflow-hidden">
+                        <img
+                          src={achievement.image_url}
+                          alt={achievement.achievement_title}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                        />
+                        <div className="absolute top-3 right-3 bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
+                          {achievement.sector}
+                        </div>
+                      </div>
+                    )}
+                    <CardHeader>
+                      <div className="flex items-start gap-3">
+                        <div className="bg-gradient-to-br from-amber-100 to-yellow-100 p-2 rounded-lg">
+                          <Award className="h-5 w-5 text-amber-600" />
+                        </div>
+                        <div className="flex-1">
+                          <CardTitle className="text-lg group-hover:text-amber-600 transition-colors line-clamp-2">
+                            {achievement.achievement_title}
+                          </CardTitle>
+                          <p className="text-sm text-gray-600 mt-1 font-semibold">{achievement.student_name}</p>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-600 line-clamp-3 mb-3">
+                        {achievement.description}
+                      </p>
+                      <div className="flex items-center justify-between text-xs text-gray-500">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {new Date(achievement.achievement_date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </div>
+                        {achievement.position && (
+                          <Badge variant="secondary" className="text-xs">
+                            {achievement.position}
+                          </Badge>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+                </div>
         )}
 
         {/* Achievement Details Modal */}
@@ -5809,7 +6060,7 @@ export default function App() {
             }}
           >
             <div
-              className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+              className="bg-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {selectedAchievement.image_url && (
@@ -5843,21 +6094,21 @@ export default function App() {
                       <Badge variant="secondary">{selectedAchievement.achievement_type}</Badge>
                     )}
                   </div>
-                  <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+                  <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
                     {selectedAchievement.achievement_title}
                   </h2>
                   <p className="text-xl text-amber-600 font-semibold mb-1">
                     🎓 {selectedAchievement.student_name}
                   </p>
                   {selectedAchievement.position && (
-                    <p className="text-lg text-gray-700 font-medium">
+                    <p className="text-lg text-muted-foreground font-medium">
                       🏆 {selectedAchievement.position}
                     </p>
                   )}
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Description</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-2">Description</h3>
                   <p className="text-gray-600 whitespace-pre-wrap">
                     {selectedAchievement.description}
                   </p>
@@ -5869,7 +6120,7 @@ export default function App() {
                       <Clock className="h-4 w-4" />
                       <span className="text-xs font-semibold">Date</span>
                     </div>
-                    <p className="text-sm font-medium text-gray-700">
+                    <p className="text-sm font-medium text-muted-foreground">
                       {new Date(selectedAchievement.achievement_date).toLocaleDateString('en-US', {
                         month: 'long',
                         day: 'numeric',
@@ -5884,7 +6135,7 @@ export default function App() {
                         <Award className="h-4 w-4" />
                         <span className="text-xs font-semibold">Organization</span>
                       </div>
-                      <p className="text-sm font-medium text-gray-700">
+                      <p className="text-sm font-medium text-muted-foreground">
                         {selectedAchievement.organization}
                       </p>
                     </div>
@@ -5907,6 +6158,216 @@ export default function App() {
           </div>
         )}
 
+        {/* Project Details Modal */}
+        {showProjectDetails && selectedProject && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3 sm:p-4"
+            onClick={() => {
+              setShowProjectDetails(false)
+              setSelectedProject(null)
+            }}
+          >
+            <div
+              className="bg-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {selectedProject.sector && selectedProject.sector.split(',').map((tag, i) => (
+                      <Badge key={i} className="bg-amber-500 hover:bg-amber-600">{tag.trim()}</Badge>
+                    ))}
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
+                    {selectedProject.achievement_title}
+                  </h2>
+                  <p className="text-lg text-muted-foreground font-medium flex items-center gap-2">
+                    <User className="w-5 h-5" /> {selectedProject.student_name}
+                  </p>
+                </div>
+                <Button
+                  onClick={() => {
+                    setShowProjectDetails(false)
+                    setSelectedProject(null)
+                  }}
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-full"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-5 mb-6">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">About the Project</h3>
+                <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                  {selectedProject.description}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-4 mb-6">
+                {selectedProject.repo_url && (
+                  <a
+                    href={selectedProject.repo_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 min-w-[200px]"
+                  >
+                    <Button className="w-full bg-gray-900 hover:bg-gray-800 text-white flex items-center justify-center gap-2 py-6 rounded-xl">
+                      <Github className="w-5 h-5" /> View Source Code
+                    </Button>
+                  </a>
+                )}
+                {selectedProject.demo_url && (
+                  <a
+                    href={selectedProject.demo_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 min-w-[200px]"
+                  >
+                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2 py-6 rounded-xl">
+                      <Eye className="w-5 h-5" /> Live Demo
+                    </Button>
+                  </a>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-gray-500 border-t pt-4">
+                <div className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Submitted on {new Date(selectedProject.achievement_date).toLocaleDateString('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </div>
+                
+                {currentUser && selectedProject.profile_id === currentUser.id && (
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                      onClick={() => {
+                        setNewProject({
+                          id: selectedProject.id,
+                          title: selectedProject.achievement_title,
+                          description: selectedProject.description,
+                          repo_url: selectedProject.repo_url,
+                          demo_url: selectedProject.demo_url,
+                          tags: selectedProject.sector
+                        });
+                        setShowProjectDetails(false);
+                        setShowAddProjectModal(true);
+                      }}
+                    >
+                      <Pencil className="w-4 h-4 mr-1" /> Edit
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => handleDeleteProject(selectedProject.id)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" /> Delete
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Project Modal */}
+        {showAddProjectModal && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3 sm:p-4"
+            onClick={() => setShowAddProjectModal(false)}
+          >
+            <div
+              className="bg-card rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+                  <Github className="h-6 w-6" /> {newProject.id ? 'Edit Repository' : 'Submit Repository'}
+                </h2>
+                <Button variant="ghost" size="sm" onClick={() => setShowAddProjectModal(false)}>
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+
+              <form onSubmit={handleAddProject} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Project Title</label>
+                  <input
+                    type="text"
+                    required
+                    value={newProject.title}
+                    onChange={(e) => setNewProject({ ...newProject, title: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none transition"
+                    placeholder="E.g., AU Connect, AI Study Hub..."
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    required
+                    value={newProject.description}
+                    onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none transition min-h-[100px]"
+                    placeholder="What does your project do?"
+                  ></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">GitHub Repository URL</label>
+                  <input
+                    type="url"
+                    required
+                    value={newProject.repo_url}
+                    onChange={(e) => setNewProject({ ...newProject, repo_url: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none transition"
+                    placeholder="https://github.com/username/repo"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Live Demo URL (Optional)</label>
+                  <input
+                    type="url"
+                    value={newProject.demo_url}
+                    onChange={(e) => setNewProject({ ...newProject, demo_url: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none transition"
+                    placeholder="https://your-project.vercel.app"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tags (Comma separated)</label>
+                  <input
+                    type="text"
+                    value={newProject.tags}
+                    onChange={(e) => setNewProject({ ...newProject, tags: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none transition"
+                    placeholder="React, Tailwind, Node.js"
+                  />
+                </div>
+
+                <div className="pt-4 flex justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={() => setShowAddProjectModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white">
+                    Submit Project
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* Full Profile Modal - Fully Responsive */}
         {showProfileModal && selectedProfile && (
           <div
@@ -5914,7 +6375,7 @@ export default function App() {
             onClick={closeProfileView}
           >
             <div
-              className="bg-white rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+              className="bg-card rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header with photo */}
@@ -5952,18 +6413,18 @@ export default function App() {
                 {/* Bio */}
                 {selectedProfile.bio && (
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-foreground mb-2 flex items-center gap-2">
                       <span className="text-xl sm:text-2xl">💭</span>
                       <span>About</span>
                     </h3>
-                    <p className="text-sm sm:text-base text-gray-700 leading-relaxed">{selectedProfile.bio}</p>
+                    <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">{selectedProfile.bio}</p>
                   </div>
                 )}
 
                 {/* Interests */}
                 {selectedProfile.interests && selectedProfile.interests.length > 0 && (
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 sm:mb-3 flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-foreground mb-2 sm:mb-3 flex items-center gap-2">
                       <span className="text-xl sm:text-2xl">🎯</span>
                       <span>Interests</span>
                     </h3>
@@ -5984,7 +6445,7 @@ export default function App() {
                 {/* Email */}
                 {selectedProfile.email && (
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-foreground mb-2 flex items-center gap-2">
                       <span className="text-xl sm:text-2xl">📧</span>
                       <span>Contact</span>
                     </h3>
@@ -5995,7 +6456,7 @@ export default function App() {
                 {/* Social Media Links */}
                 {(selectedProfile.instagram || selectedProfile.github || selectedProfile.linkedin) && (
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-2 sm:mb-3 flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-foreground mb-2 sm:mb-3 flex items-center gap-2">
                       <span className="text-xl sm:text-2xl">🔗</span>
                       <span>Connect</span>
                     </h3>
@@ -6082,7 +6543,7 @@ export default function App() {
         {/* Event Details Modal - Fully Responsive */}
         {showEventDetails && selectedEvent && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
-            <div className="bg-white rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-2xl md:max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-card rounded-xl sm:rounded-2xl max-w-[95vw] sm:max-w-2xl md:max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
               {/* Header Image */}
               <div className="relative h-40 sm:h-52 md:h-64 bg-gradient-to-br from-purple-400 to-pink-400">
                 {selectedEvent.image_url ? (
@@ -6098,7 +6559,7 @@ export default function App() {
                 )}
                 <button
                   onClick={() => setShowEventDetails(false)}
-                  className="absolute top-2 right-2 sm:top-3 sm:right-3 md:top-4 md:right-4 bg-white/90 hover:bg-white text-gray-800 rounded-full p-1.5 sm:p-2 shadow-lg"
+                  className="absolute top-2 right-2 sm:top-3 sm:right-3 md:top-4 md:right-4 bg-white/90 hover:bg-card text-foreground rounded-full p-1.5 sm:p-2 shadow-lg"
                 >
                   <X className="h-5 w-5 sm:h-6 sm:w-6" />
                 </button>
@@ -6107,7 +6568,7 @@ export default function App() {
               {/* Content */}
               <div className="p-4 sm:p-6 md:p-8">
                 <div className="flex flex-col sm:flex-row items-start sm:justify-between gap-2 sm:gap-4 mb-3 sm:mb-4">
-                  <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-800 leading-tight">{selectedEvent.title}</h2>
+                  <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight">{selectedEvent.title}</h2>
                   <span className={`${getCategoryColor(selectedEvent.category)} text-white px-3 sm:px-4 py-1 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap flex-shrink-0`}>
                     {selectedEvent.category}
                   </span>
@@ -6126,7 +6587,7 @@ export default function App() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs sm:text-sm text-gray-500">Date</p>
-                        <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base leading-tight">
+                        <p className="font-semibold text-foreground text-xs sm:text-sm md:text-base leading-tight">
                           {new Date(selectedEvent.event_date).toLocaleDateString('en-US', {
                             weekday: 'short',
                             year: 'numeric',
@@ -6143,7 +6604,7 @@ export default function App() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs sm:text-sm text-gray-500">Time</p>
-                        <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base">{selectedEvent.event_time}</p>
+                        <p className="font-semibold text-foreground text-xs sm:text-sm md:text-base">{selectedEvent.event_time}</p>
                       </div>
                     </div>
 
@@ -6153,7 +6614,7 @@ export default function App() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs sm:text-sm text-gray-500">Venue</p>
-                        <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base break-words">{selectedEvent.venue}</p>
+                        <p className="font-semibold text-foreground text-xs sm:text-sm md:text-base break-words">{selectedEvent.venue}</p>
                       </div>
                     </div>
                   </div>
@@ -6166,7 +6627,7 @@ export default function App() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs sm:text-sm text-gray-500">Club / Organization</p>
-                          <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base break-words">{selectedEvent.club_name}</p>
+                          <p className="font-semibold text-foreground text-xs sm:text-sm md:text-base break-words">{selectedEvent.club_name}</p>
                         </div>
                       </div>
                     )}
@@ -6178,7 +6639,7 @@ export default function App() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs sm:text-sm text-gray-500">Organized By</p>
-                          <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base break-words">{selectedEvent.organizer}</p>
+                          <p className="font-semibold text-foreground text-xs sm:text-sm md:text-base break-words">{selectedEvent.organizer}</p>
                         </div>
                       </div>
                     )}
@@ -6190,7 +6651,7 @@ export default function App() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs sm:text-sm text-gray-500">Capacity</p>
-                          <p className="font-semibold text-gray-800 text-xs sm:text-sm md:text-base">{selectedEvent.max_capacity} people</p>
+                          <p className="font-semibold text-foreground text-xs sm:text-sm md:text-base">{selectedEvent.max_capacity} people</p>
                         </div>
                       </div>
                     )}
@@ -6202,7 +6663,7 @@ export default function App() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs sm:text-sm text-gray-500">Contact</p>
-                          <p className="font-semibold text-gray-800 text-[10px] sm:text-xs md:text-sm break-all">{selectedEvent.contact_email}</p>
+                          <p className="font-semibold text-foreground text-[10px] sm:text-xs md:text-sm break-all">{selectedEvent.contact_email}</p>
                         </div>
                       </div>
                     )}
@@ -6212,11 +6673,11 @@ export default function App() {
                 {/* Chief Guests */}
                 {selectedEvent.guests && (
                   <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-purple-50 rounded-lg">
-                    <h3 className="font-semibold text-gray-800 mb-2 flex items-center text-sm sm:text-base">
+                    <h3 className="font-semibold text-foreground mb-2 flex items-center text-sm sm:text-base">
                       <Star className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-purple-600 flex-shrink-0" />
                       Chief Guests
                     </h3>
-                    <p className="text-gray-700 text-xs sm:text-sm md:text-base">{selectedEvent.guests}</p>
+                    <p className="text-muted-foreground text-xs sm:text-sm md:text-base">{selectedEvent.guests}</p>
                   </div>
                 )}
 
@@ -6251,7 +6712,7 @@ export default function App() {
             <div className="relative overflow-hidden bg-gradient-to-br from-orange-500 via-red-500 to-pink-600 rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl">
               {/* Animated Background */}
               <div className="absolute inset-0 opacity-20">
-                <div className="absolute top-0 right-0 w-48 h-48 md:w-96 md:h-96 bg-white rounded-full blur-3xl animate-pulse"></div>
+                <div className="absolute top-0 right-0 w-48 h-48 md:w-96 md:h-96 bg-card rounded-full blur-3xl animate-pulse"></div>
                 <div className="absolute bottom-0 left-0 w-36 h-36 md:w-72 md:h-72 bg-yellow-300 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
               </div>
 
@@ -6300,7 +6761,7 @@ export default function App() {
             {/* Notifications - Show who selected you */}
             {diceSelectionNotifications.length > 0 && (
               <div className="space-y-4">
-                <h3 className="text-lg font-bold text-gray-800">🎉 Someone selected you!</h3>
+                <h3 className="text-lg font-bold text-foreground">🎉 Someone selected you!</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {diceSelectionNotifications.map((notification) => (
                     <Card key={notification.id} className="border-2 border-orange-300 bg-orange-50 hover:shadow-xl transition-all">
@@ -6316,7 +6777,7 @@ export default function App() {
                             )}
                           </div>
                           <div className="flex-1">
-                            <h4 className="font-bold text-gray-800">{notification.name}</h4>
+                            <h4 className="font-bold text-foreground">{notification.name}</h4>
                             <p className="text-sm text-gray-600">{notification.department} • Year {notification.year}</p>
                           </div>
                           <div className="bg-gradient-to-br from-orange-500 to-pink-600 rounded-full p-2">
@@ -6359,7 +6820,7 @@ export default function App() {
                     {showDiceAnimation ? (
                       <div className="space-y-6">
                         <div className="text-8xl animate-bounce">🎲</div>
-                        <p className="text-2xl font-bold text-gray-700">Rolling...</p>
+                        <p className="text-2xl font-bold text-muted-foreground">Rolling...</p>
                       </div>
                     ) : (
                       <div className="space-y-6">
@@ -6421,7 +6882,7 @@ export default function App() {
                           <div className="text-6xl font-black text-white">{myDiceNumber}</div>
                         </div>
                         <div>
-                          <h3 className="text-2xl font-black text-gray-800">You Rolled: {myDiceNumber}</h3>
+                          <h3 className="text-2xl font-black text-foreground">You Rolled: {myDiceNumber}</h3>
                           <p className="text-gray-600">{diceMatches.length} {diceMatches.length === 1 ? 'person' : 'people'} rolled the same number</p>
                         </div>
                       </div>
@@ -6438,7 +6899,7 @@ export default function App() {
                   <Card>
                     <CardContent className="p-12 text-center">
                       <div className="text-6xl mb-4">😔</div>
-                      <p className="text-xl font-bold text-gray-700 mb-2">No matches yet</p>
+                      <p className="text-xl font-bold text-muted-foreground mb-2">No matches yet</p>
                       <p className="text-gray-500">No one else rolled {myDiceNumber} today. Check back later!</p>
                     </CardContent>
                   </Card>
@@ -6468,7 +6929,7 @@ export default function App() {
                           </div>
 
                           {/* Profile Info */}
-                          <h3 className="text-xl font-bold text-gray-800 mb-1">{profile.name}</h3>
+                          <h3 className="text-xl font-bold text-foreground mb-1">{profile.name}</h3>
                           <p className="text-sm text-gray-500 mb-2">{profile.department} • Year {profile.year}</p>
 
                           {profile.bio && (
@@ -6542,20 +7003,20 @@ export default function App() {
 
                 {/* Profile Info */}
                 <div className="text-center">
-                  <h3 className="text-2xl font-bold text-gray-800 mb-2">{selectedNotification.name}</h3>
+                  <h3 className="text-2xl font-bold text-foreground mb-2">{selectedNotification.name}</h3>
                   <p className="text-gray-600 mb-4">{selectedNotification.department} • Year {selectedNotification.year}</p>
                 </div>
 
                 {selectedNotification.bio && (
                   <div className="bg-gray-50 rounded-xl p-4">
-                    <h4 className="font-bold text-gray-800 mb-2">Bio</h4>
-                    <p className="text-gray-700">{selectedNotification.bio}</p>
+                    <h4 className="font-bold text-foreground mb-2">Bio</h4>
+                    <p className="text-muted-foreground">{selectedNotification.bio}</p>
                   </div>
                 )}
 
                 {selectedNotification.interests && selectedNotification.interests.length > 0 && (
                   <div className="bg-purple-50 rounded-xl p-4">
-                    <h4 className="font-bold text-gray-800 mb-2">Interests</h4>
+                    <h4 className="font-bold text-foreground mb-2">Interests</h4>
                     <div className="flex flex-wrap gap-2">
                       {selectedNotification.interests.map((interest, idx) => (
                         <Badge key={idx} variant="secondary" className="text-sm">
@@ -6568,7 +7029,7 @@ export default function App() {
 
                 {selectedNotification.hobbies && selectedNotification.hobbies.length > 0 && (
                   <div className="bg-pink-50 rounded-xl p-4">
-                    <h4 className="font-bold text-gray-800 mb-2">Hobbies</h4>
+                    <h4 className="font-bold text-foreground mb-2">Hobbies</h4>
                     <div className="flex flex-wrap gap-2">
                       {selectedNotification.hobbies.map((hobby, idx) => (
                         <Badge key={idx} className="bg-pink-200 text-pink-800 text-sm">
@@ -6635,7 +7096,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-2">{selectedDiceProfile.name}</h3>
+                  <h3 className="text-xl font-bold text-foreground mb-2">{selectedDiceProfile.name}</h3>
                   <p className="text-gray-600 mb-4">{selectedDiceProfile.department} • Year {selectedDiceProfile.year}</p>
                 </div>
 
@@ -6649,7 +7110,7 @@ export default function App() {
                   </ul>
                 </div>
 
-                <p className="text-center font-bold text-gray-700">Are you sure you want to select this person?</p>
+                <p className="text-center font-bold text-muted-foreground">Are you sure you want to select this person?</p>
 
                 <div className="flex gap-3">
                   <Button
@@ -6689,14 +7150,14 @@ export default function App() {
                   <div className="mb-4">
                     <Dices className="h-24 w-24 mx-auto text-orange-500 opacity-50" />
                   </div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-3">
+                  <h3 className="text-xl font-bold text-foreground mb-3">
                     Coming Soon!
                   </h3>
 
                   {/* How It Works */}
                   <div className="bg-gradient-to-br from-orange-50 to-pink-50 rounded-xl p-4 mb-4 text-left border-2 border-orange-200">
                     <p className="text-sm font-bold text-orange-600 mb-2 text-center">🎲 How Dice Dating Works</p>
-                    <div className="space-y-2 text-xs text-gray-700">
+                    <div className="space-y-2 text-xs text-muted-foreground">
                       <p className="flex items-start gap-2">
                         <span className="font-bold text-orange-500 mt-0.5">•</span>
                         <span><span className="font-semibold">Roll once daily</span> to get your lucky number (1-6)</span>
@@ -6716,12 +7177,12 @@ export default function App() {
                     </div>
                   </div>
 
-                  <p className="text-gray-700 mb-4 text-sm">
+                  <p className="text-muted-foreground mb-4 text-sm">
                     Unlocks when we reach <span className="font-bold text-orange-600">50 students or above</span>
                   </p>
 
                   <div className="bg-gradient-to-r from-orange-100 to-pink-100 rounded-xl p-4 mb-4">
-                    <p className="text-sm font-semibold text-gray-800">Current Users</p>
+                    <p className="text-sm font-semibold text-foreground">Current Users</p>
                     <p className="text-3xl font-black text-orange-600">{totalUserCount} / 50</p>
                     <div className="w-full bg-gray-200 rounded-full h-3 mt-3">
                       <div
