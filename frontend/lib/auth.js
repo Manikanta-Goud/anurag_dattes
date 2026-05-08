@@ -1,6 +1,6 @@
 // AUTHENTICATION HELPERS
 // Secure authentication utilities
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 import { supabaseAdmin } from './supabase'
 
 const SALT_ROUNDS = 12
