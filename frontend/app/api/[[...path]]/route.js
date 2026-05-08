@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase, supabaseAdmin } from '../../../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
-import { clerkClient, getAuth } from '@clerk/nextjs/server'
+import { clerkClient, auth } from '@clerk/nextjs/server'
 import { hashPassword, verifyPassword } from '../../../lib/auth'
 import { signupSchema, loginSchema, updateProfileSchema } from '../../../lib/validations'
 
@@ -11,7 +11,7 @@ import { signupSchema, loginSchema, updateProfileSchema } from '../../../lib/val
 // ============================================================
 async function requireAuth(request) {
   try {
-    const { userId } = getAuth(request)
+    const { userId } = await auth()
     if (!userId) {
       // Log unauthenticated probe attempts
       await logSecurityEvent(request, {
