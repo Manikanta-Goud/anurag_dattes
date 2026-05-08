@@ -79,6 +79,7 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState(null)
   const [showProjectDetails, setShowProjectDetails] = useState(false)
   const [showAddProjectModal, setShowAddProjectModal] = useState(false)
+  const [showMyProjectsOnly, setShowMyProjectsOnly] = useState(false)
 
   // Achievements (Wins) state
   const [achievements, setAchievements] = useState([])
@@ -5962,7 +5963,19 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="flex justify-start lg:justify-end mt-6">
+                <div className="flex flex-wrap gap-3 justify-start lg:justify-end mt-6">
+                  <Button
+                    onClick={() => setShowMyProjectsOnly(!showMyProjectsOnly)}
+                    className={`font-bold px-6 py-6 rounded-full shadow-lg border-2 transition-all transform hover:scale-105 flex items-center ${
+                      showMyProjectsOnly 
+                        ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200' 
+                        : 'bg-white/20 text-white border-transparent hover:bg-white/30'
+                    }`}
+                  >
+                    <User className="h-5 w-5 mr-2" />
+                    {showMyProjectsOnly ? 'Show All Repos' : 'My Repos'}
+                  </Button>
+
                   <Button 
                     onClick={() => {
                       setNewProject({ title: '', description: '', repo_url: '', demo_url: '', tags: '' });
@@ -5978,18 +5991,33 @@ export default function App() {
             </div>
 
             {/* Achievements Grid */}
-            {projects.length === 0 ? (
-              <div className="text-center py-20 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-2xl border-2 border-dashed border-amber-200">
-                <div className="relative inline-block mb-6">
-                  <div className="absolute inset-0 bg-amber-400 blur-2xl opacity-20 animate-pulse"></div>
-                  <Github className="relative h-20 w-20 mx-auto text-amber-400" />
-                </div>
-                <h3 className="text-xl font-bold text-muted-foreground mb-2">No Achievements Yet</h3>
-                <p className="text-gray-500 mb-4">Student projects will be showcased here!</p>
-              </div>
-            ) : (
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {projects.map((achievement) => (
+            {(() => {
+              const displayedProjects = showMyProjectsOnly && currentUser
+                ? projects.filter(p => p.profile_id === currentUser.id)
+                : projects;
+
+              if (displayedProjects.length === 0) {
+                return (
+                  <div className="text-center py-20 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-2xl border-2 border-dashed border-amber-200">
+                    <div className="relative inline-block mb-6">
+                      <div className="absolute inset-0 bg-amber-400 blur-2xl opacity-20 animate-pulse"></div>
+                      <Github className="relative h-20 w-20 mx-auto text-amber-400" />
+                    </div>
+                    <h3 className="text-xl font-bold text-muted-foreground mb-2">
+                      {showMyProjectsOnly ? "No Repositories Submitted Yet" : "No Achievements Yet"}
+                    </h3>
+                    <p className="text-gray-500 mb-4">
+                      {showMyProjectsOnly 
+                        ? "You haven't submitted any repositories yet! Click 'Submit Repository' to showcase your project." 
+                        : "Student projects will be showcased here!"}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                  {displayedProjects.map((achievement) => (
                   <Card
                     key={achievement.id}
                     className="group hover:shadow-2xl transition-all duration-300 cursor-pointer overflow-hidden border-2 border-transparent hover:border-amber-300"
@@ -6046,7 +6074,8 @@ export default function App() {
                   </Card>
                 ))}
               </div>
-            )}
+            );
+          })()}
                 </div>
         )}
 
