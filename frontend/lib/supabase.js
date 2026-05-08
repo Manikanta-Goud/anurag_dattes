@@ -7,14 +7,17 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 // Validate required environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing required Supabase environment variables. Please check your .env.local file.')
+  console.error('❌ CRITICAL ERROR: Missing required Supabase environment variables NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY!')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+const safeUrl = supabaseUrl || 'https://placeholder.supabase.co'
+const safeAnonKey = supabaseAnonKey || 'placeholder_anon_key'
+
+export const supabase = createClient(safeUrl, safeAnonKey)
 
 // Service role client for server-side operations (bypasses RLS)
 export const supabaseAdmin = supabaseServiceKey 
-  ? createClient(supabaseUrl, supabaseServiceKey, {
+  ? createClient(safeUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false

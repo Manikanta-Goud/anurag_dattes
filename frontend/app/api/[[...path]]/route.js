@@ -470,7 +470,7 @@ async function handleGetProfileByClerkId(request) {
     if (error && error.code !== 'PGRST116') { // PGRST116 = not found
       console.error('❌ Get profile by Clerk ID error:', error)
       return NextResponse.json(
-        { error: 'Failed to fetch profile' },
+        { error: 'Failed to fetch profile', details: error.message || error },
         { status: 500 }
       )
     }
@@ -493,7 +493,7 @@ async function handleGetProfileByClerkId(request) {
   } catch (error) {
     console.error('❌ Get profile by Clerk ID error:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error.message || error },
       { status: 500 }
     )
   }
@@ -569,7 +569,7 @@ async function handleGetProfileCount(request) {
   } catch (error) {
     console.error('❌ Get profile count error:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error.message || error },
       { status: 500 }
     )
   }
